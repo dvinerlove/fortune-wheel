@@ -24,6 +24,8 @@ export interface Settings {
     wheelBgOpacity: number;
     wheelBorderColor: string;
     pointerColor: string;
+    colorOpacity: number;
+    sectorLineOpacity: number;
   };
   steam: {
     region: string;
@@ -70,7 +72,9 @@ export const DEFAULT_SETTINGS: Settings = {
     pointerColor: '#ffffff',
     wheelImageOpacity: 0.8,
     wheelBgColor: '#000000',
-    wheelBgOpacity: 0.1
+    wheelBgOpacity: 0.1,
+    colorOpacity: 0.7,
+    sectorLineOpacity: 0.5
   },
   steam: {
     region: 'kz',
@@ -83,13 +87,13 @@ export const DEFAULT_SETTINGS: Settings = {
     showGameNames: true,
     showImages: false,
     showColors: true,
-    textPosition: 'outer',
+    textPosition: 'far-outer',
     showSectorLines: true,
     idleSpin: true,
     textColor: '#ffffff',
     textStrokeColor: '#000000',
     textStrokeWidth: 0.1,
-    textTruncationMultiplier: 2.5
+    textTruncationMultiplier: 2.0
   },
   prices: {
     showPrices: true,

@@ -205,8 +205,9 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
                   <path 
                     d={pathData} 
                     fill={game.color} 
-                    stroke={settings.wheel.showSectorLines ? "#1f2937" : "transparent"} 
+                    stroke="transparent" 
                     strokeWidth="0.2" 
+                    opacity={settings.customization.colorOpacity}
                   />
                 )}
                 {settings.wheel.showImages && game.image && (
@@ -246,6 +247,26 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
               </g>
             );
           })}
+          {settings.wheel.showSectorLines && (
+            <g style={{ opacity: settings.customization.sectorLineOpacity }}>
+              {games.map((game, i) => {
+                const sectorStartAngle = i * sectorAngle - 90;
+                const x1 = 50 + 50 * Math.cos((sectorStartAngle * Math.PI) / 180);
+                const y1 = 50 + 50 * Math.sin((sectorStartAngle * Math.PI) / 180);
+                return (
+                  <line 
+                    key={`line-${game.id}`}
+                    x1="50" 
+                    y1="50" 
+                    x2={x1} 
+                    y2={y1} 
+                    stroke="#1f2937" 
+                    strokeWidth="0.2"
+                  />
+                );
+              })}
+            </g>
+          )}
         </svg>
       </motion.div>
 

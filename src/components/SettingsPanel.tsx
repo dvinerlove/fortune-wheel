@@ -92,6 +92,48 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     };
     console.log('State to share (full):', stateToShare);
     
+    // First try URL-based share (works on GitHub Pages without backend)
+    try {
+      const stateJson = JSON.stringify(stateToShare);
+      const encodedState = btoa(encodeURIComponent(stateJson));
+      const shareUrl = `${window.location.origin}${window.location.pathname}?state=${encodedState}`;
+      console.log('Generated URL share URL:', shareUrl);
+      
+      // Copy the link
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 3000);
+      } catch (clipboardErr) {
+        console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
+        
+        const textArea = document.createElement('textarea');
+        textArea.value = shareUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        textArea.style.top = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+          document.execCommand('copy');
+          console.log('Copied via fallback');
+          setLinkCopied(true);
+          setTimeout(() => setLinkCopied(false), 3000);
+        } catch (fallbackErr) {
+          console.error('Fallback copy also failed:', fallbackErr);
+          prompt('Скопируйте ссылку:', shareUrl);
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
+      return; // Success with URL-based share
+    } catch (urlErr) {
+      console.error('Failed to create URL-based share, trying API:', urlErr);
+    }
+    
+    // Fallback to API if URL-based fails
     try {
       const response = await fetch(`${API_URL}/api/shares`, {
         method: 'POST',
@@ -304,7 +346,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           return;
                         }
                         const reader = new FileReader();
-                        reader.onload = (event) => setSettings({ ...settings, customization: { ...settings.customization, wheelImage: event.target?.result as string } });
+                        reader.onload = (event) => {
+                          // Auto-disable colors and lines when adding an image
+                          setSettings({ 
+                            ...settings, 
+                            customization: { ...settings.customization, wheelImage: event.target?.result as string },
+                            wheel: { ...settings.wheel, showColors: false, showSectorLines: false }
+                          });
+                        };
                         reader.readAsDataURL(file);
                       }
                     }} />
@@ -318,7 +367,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                   <div className="space-y-3 pt-2">
                     <label className="text-slate-300 text-sm font-semibold">Настройки фона колеса</label>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1 col-span-1">
                         <label className="text-slate-400 text-xs">Цвет подложки</label>
                         <input type="color" value={settings.customization.wheelBgColor} onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, wheelBgColor: e.target.value } })} className="w-full h-10 rounded-lg" />
@@ -348,6 +397,32 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                         />
                         <div className="text-slate-400 text-xs text-center">{Math.round(settings.customization.wheelImageOpacity * 100)}%</div>
+                      </div>
+                      <div className="space-y-1 col-span-1">
+                        <label className="text-slate-400 text-xs">Прозр. цветов</label>
+                        <input 
+                          type="range" 
+                          min="0" 
+                          max="1" 
+                          step="0.05" 
+                          value={settings.customization.colorOpacity} 
+                          onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, colorOpacity: Number(e.target.value) } })} 
+                          className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <div className="text-slate-400 text-xs text-center">{Math.round(settings.customization.colorOpacity * 100)}%</div>
+                      </div>
+                      <div className="space-y-1 col-span-1">
+                        <label className="text-slate-400 text-xs">Прозр. линий</label>
+                        <input 
+                          type="range" 
+                          min="0" 
+                          max="1" 
+                          step="0.05" 
+                          value={settings.customization.sectorLineOpacity} 
+                          onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, sectorLineOpacity: Number(e.target.value) } })} 
+                          className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <div className="text-slate-400 text-xs text-center">{Math.round(settings.customization.sectorLineOpacity * 100)}%</div>
                       </div>
                     </div>
                   </div>
