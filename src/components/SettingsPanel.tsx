@@ -29,6 +29,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [editForm, setEditForm] = useState({ name: '', appId: '', color: '', image: '' });
   const [linkCopied, setLinkCopied] = useState(false);
   const [dbStatus, setDbStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  const [dbError, setDbError] = useState<string | null>(null);
   
   const API_URL = import.meta.env.VITE_API_URL || "https://tyxlbygyynhdxcexgaxf.functions.supabase.co/fortune-wheel";
   
@@ -36,13 +37,26 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     if (!isOpen) return;
     
     const checkDbStatus = async () => {
+      setDbError(null);
       try {
         const res = await fetch(`${API_URL}/api/health`);
-        if (res.ok) setDbStatus('connected');
-        else throw new Error('Not connected');
-      } catch (err) {
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text };
+        }
+        console.log('Health check response:', { status: res.status, data });
+        if (res.ok) {
+          setDbStatus('connected');
+        } else {
+          throw new Error(JSON.stringify(data));
+        }
+      } catch (err: any) {
         console.error('DB check failed:', err);
         setDbStatus('disconnected');
+        setDbError(err?.message || String(err));
       }
     };
     
@@ -633,6 +647,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       )}
                     </div>
                   </div>
+                  {dbError && (
+                    <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm break-all">
+                      {dbError}
+                    </div>
+                  )}
                   <div className="text-slate-400 text-xs">
                     API URL: {API_URL}
                   </div>

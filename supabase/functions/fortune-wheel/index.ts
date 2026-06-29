@@ -7,6 +7,9 @@ console.log("Hello from Functions!");
 // Initialize Supabase client
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+console.log("SUPABASE_URL is set:", !!SUPABASE_URL);
+console.log("SUPABASE_SERVICE_ROLE_KEY is set:", !!SUPABASE_SERVICE_ROLE_KEY);
+
 const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false }
@@ -37,19 +40,56 @@ async function fetchSteamPriceFromAPI(appId: string, region: string) {
 }
 
 Deno.serve(async (req) => {
+  console.log("=== NEW REQUEST ===");
+  console.log("Method:", req.method);
+  console.log("URL:", req.url);
+  
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
+    console.log("Handling OPTIONS preflight");
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
     const url = new URL(req.url);
-    const pathname = url.pathname.replace("/functions/v1/fortune-wheel", "");
+    console.log("Full pathname:", url.pathname);
+    
+    // Let's extract the path after the function name
+    // Possible function URLs:
+    // 1. https://tyxlbygyynhdxcexgaxf.functions.supabase.co/fortune-wheel
+    // 2. https://tyxlbygyynhdxcexgaxf.supabase.co/functions/v1/fortune-wheel
+    // So let's remove any prefix that includes "fortune-wheel"
+    let pathname = url.pathname;
+    
+    // Find the position of "fortune-wheel" in the path
+    const functionName = "fortune-wheel";
+    const idx = pathname.indexOf(functionName);
+    if (idx !== -1) {
+      // Take everything after "fortune-wheel"
+      pathname = pathname.slice(idx + functionName.length) || "/";
+    }
+    
+    console.log("Final processed pathname:", pathname);
 
-    // Health check
-    if (pathname === "/api/health" || pathname === "/health") {
-      const { error } = await supabase.from("shares").select("id").limit(1);
-      if (error) throw error;
+    // Health check - handle ANY path that might be a health check
+    if (
+      pathname === "/" || 
+      pathname === "/health" || 
+      pathname === "/api/health" ||
+      pathname.includes("health")
+    ) {
+      console.log("RUNNING HEALTH CHECK");
+      const { data, error } = await supabase.from("shares").select("id").limit(1);
+      console.log("Health check query - data:", data, "error:", error);
+      
+      if (error) {
+        console.error("Health check ERROR:", error);
+        return new Response(
+          JSON.stringify({ status: "error", error: error.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
       return new Response(
         JSON.stringify({ status: "ok", database: "connected", supabaseUrl: SUPABASE_URL }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -57,7 +97,7 @@ Deno.serve(async (req) => {
     }
 
     // Create share
-    if (req.method === "POST" && (pathname === "/api/shares" || pathname === "/shares")) {
+    if (req.method === "POST" && (pathname === "/shares" || pathname === "/api/shares")) {
       const { data } = await req.json();
       const id = Math.random().toString(36).substring(2, 8);
       const { error } = await supabase.from("shares").insert({ id, data });
@@ -69,7 +109,7 @@ Deno.serve(async (req) => {
     }
 
     // Get share
-    if (req.method === "GET" && pathname.startsWith("/api/shares/")) {
+    if (req.method === "GET" && (pathname.startsWith("/shares/") || pathname.startsWith("/api/shares/"))) {
       const id = pathname.split("/").pop() || "";
       const { data, error } = await supabase.from("shares").select("data").eq("id", id).single();
       if (error) throw error;
@@ -80,7 +120,7 @@ Deno.serve(async (req) => {
     }
 
     // Get game price
-    if (req.method === "GET" && pathname.startsWith("/api/price/")) {
+    if (req.method === "GET" && (pathname.startsWith("/price/") || pathname.startsWith("/api/price/"))) {
       const appId = pathname.split("/").pop() || "";
       const region = url.searchParams.get("region") || "kz";
       const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
@@ -135,7 +175,7 @@ Deno.serve(async (req) => {
     }
 
     // Preload multiple prices
-    if (req.method === "POST" && (pathname === "/api/prices/preload" || pathname === "/prices/preload")) {
+    if (req.method === "POST" && (pathname === "/prices/preload" || pathname === "/api/prices/preload")) {
       const { appIds, region = "kz" } = await req.json();
       const results = [];
       const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
@@ -187,14 +227,31 @@ Deno.serve(async (req) => {
       );
     }
 
-    return new Response(JSON.stringify({ error: "Not found" }), {
-      status: 404,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 400,
-    });
+    console.log("NO ROUTE MATCHED");
+    return new Response(
+      JSON.stringify({ 
+        error: "Not found", 
+        pathname: pathname, 
+        fullPath: url.pathname,
+        availableEndpoints: [
+          "GET /",
+          "GET /health",
+          "GET /api/health",
+          "POST /shares",
+          "POST /api/shares",
+          "GET /shares/:id",
+          "GET /api/shares/:id"
+        ]
+      }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error: any) {
+    console.error("=== FUNCTION ERROR ===");
+    console.error("Message:", error.message);
+    console.error("Stack:", error.stack);
+    return new Response(
+      JSON.stringify({ error: error.message, stack: error.stack }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+    );
   }
 });
