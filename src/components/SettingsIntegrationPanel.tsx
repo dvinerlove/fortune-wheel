@@ -61,7 +61,7 @@ const SettingsIntegrationPanel: React.FC<SettingsIntegrationPanelProps> = ({
             <span className="text-slate-300">Включить интеграцию</span>
             <input type="checkbox" checked={settings.steam.enableIntegration} onChange={(e) => setSettings({ ...settings, steam: { ...settings.steam, enableIntegration: e.target.checked } })} className="w-5 h-5 accent-indigo-500" />
           </label>
-          
+
           {settings.steam.enableIntegration && (
             <div className="space-y-4 pt-2">
               <div className="space-y-2">

@@ -325,3 +325,5 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
         </div>
       </div>
     </div>
+  );
+};
