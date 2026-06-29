@@ -37,7 +37,7 @@ const SteamGameSelectionModal: React.FC<SteamGameSelectionModalProps> = ({
               className="flex items-center gap-3 p-3 bg-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-700 transition"
               onClick={() => onSelect(result.appId)}
             >
-              {result.icon && <img src={`https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${result.appId}/${result.icon}.jpg`} alt={result.name} className="w-10 h-10 rounded-md" />}
+              {result.icon && <img src={result.icon} alt={result.name} className="w-10 h-10 rounded-md" />}
               <span className="text-white font-medium">{result.name}</span>
             </div>
           ))}

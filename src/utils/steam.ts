@@ -204,3 +204,67 @@ export async function preloadPrices(appIds: string[], region: string, force: boo
     return {};
   }
 }
+
+export interface MappingSuggestion {
+  appId: string;
+  name: string;
+  icon?: string;
+  isMostUsed?: boolean;
+  isExisting?: boolean;
+}
+
+export async function getMappingSuggestions(gameName: string): Promise<{ existing: string | null, suggestions: MappingSuggestion[] }> {
+  try {
+    const response = await fetch(`${API_URL}/api/mappings/suggest?gameName=${encodeURIComponent(gameName)}`);
+    if (!response.ok) return { existing: null, suggestions: [] };
+
+    const data = await response.json();
+
+    const suggestions: MappingSuggestion[] = [];
+
+    // Add existing mapping first if present
+    if (data.existing?.app_id) {
+      // Try to get details for existing mapping
+      const existingSearchResult = data.search?.find((s: any) => s.appId === data.existing.app_id);
+      suggestions.push({
+        appId: data.existing.app_id,
+        name: existingSearchResult?.name || "Existing Mapping",
+        icon: existingSearchResult?.icon,
+        isExisting: true
+      });
+    }
+
+    // Add most used mappings
+    if (data.mostUsed) {
+      for (const usage of data.mostUsed) {
+        // Skip if already added
+        if (suggestions.find(s => s.appId === usage.app_id)) continue;
+
+        const searchResult = data.search?.find((s: any) => s.appId === usage.app_id);
+        suggestions.push({
+          appId: usage.app_id,
+          name: searchResult?.name || usage.app_id,
+          icon: searchResult?.icon,
+          isMostUsed: true
+        });
+      }
+    }
+
+    // Add search results
+    if (data.search) {
+      for (const result of data.search) {
+        if (suggestions.find(s => s.appId === result.appId)) continue;
+        suggestions.push({
+          appId: result.appId,
+          name: result.name,
+          icon: result.icon
+        });
+      }
+    }
+
+    return { existing: data.existing?.app_id || null, suggestions };
+  } catch (error) {
+    console.error('Error fetching mapping suggestions:', error);
+    return { existing: null, suggestions: [] };
+  }
+}

@@ -44,7 +44,10 @@ async function searchSteamGames(query: string) {
     return data.slice(0, 10).map((item: any) => ({
       appId: item.appid,
       name: item.name,
-      icon: `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${item.appid}/${item.img_icon_url}.jpg`
+      // Use library icon as fallback
+      icon: item.img_icon_url 
+        ? `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${item.appid}/${item.img_icon_url}.jpg` 
+        : `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${item.appid}/library_600x900_2x.jpg`
     }));
   } catch (error) {
     return [];
@@ -121,12 +124,69 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Save game mapping
+    // Get mapping suggestions (most used + search results
+    if (req.method === "GET" && (pathname.startsWith("/api/mappings/suggest") || pathname.startsWith("/mappings/suggest"))) {
+      const url2 = new URL(req.url);
+      const gameName = decodeURIComponent(url2.searchParams.get("gameName") || "");
+      
+      // First get existing mapping
+      const { data: existingMapping, error: mappingErr } = await supabase
+        .from("game_mappings")
+        .select("app_id")
+        .eq("game_name", gameName)
+        .maybeSingle();
+
+      // Then search steam search results
+      const searchResults = await searchSteamGames(gameName);
+
+      // Then get most used mappings for similar games
+      const { data: usageData } = await supabase
+        .from("game_mapping_usage")
+        .select("app_id, count")
+        .eq("game_name", gameName)
+        .order("count", { ascending: false });
+
+      return new Response(
+        JSON.stringify({
+          existing: existingMapping,
+          search: searchResults,
+          mostUsed: usageData
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Save game mapping (with usage tracking)
     if (req.method === "POST" && (pathname === "/api/mappings" || pathname === "/mappings")) {
       const { gameName, appId } = await req.json();
       const decodedName = decodeURIComponent(gameName);
-      const { error } = await supabase.from("game_mappings").upsert({ game_name: decodedName, app_id: appId, updated_at: new Date().toISOString() });
-      if (error) throw error;
+
+      // Upsert mapping
+      const { error: upsertError } = await supabase
+        .from("game_mappings")
+        .upsert({ game_name: decodedName, app_id: appId, updated_at: new Date().toISOString() });
+      if (upsertError) throw upsertError;
+
+      // Increment usage count
+      const { data: existingUsage } = await supabase
+        .from("game_mapping_usage")
+        .select("count")
+        .eq("game_name", decodedName)
+        .eq("app_id", appId)
+        .maybeSingle();
+
+      if (existingUsage) {
+        await supabase
+          .from("game_mapping_usage")
+          .update({ count: existingUsage.count + 1, updated_at: new Date().toISOString() })
+          .eq("game_name", decodedName)
+          .eq("app_id", appId);
+      } else {
+        await supabase
+          .from("game_mapping_usage")
+          .insert({ game_name: decodedName, app_id: appId, count: 1, updated_at: new Date().toISOString() });
+      }
+
       return new Response(
         JSON.stringify({ success: true }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }

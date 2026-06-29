@@ -72,7 +72,12 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
       animationFrameRef.current = null;
     }
     
-    const spinDegrees = 1800 + Math.random() * 360;
+    // Use cryptographically secure random
+    const randomArray = new Uint32Array(1);
+    crypto.getRandomValues(randomArray);
+    const random = randomArray[0] / 0xFFFFFFFF; // Convert to 0-1
+    
+    const spinDegrees = 1800 + random * 360;
     const newRotation = currentRotationRef.current - spinDegrees;
     
     await controls.start({

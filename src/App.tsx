@@ -2,14 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import type { Game, Settings, HistoryItem } from './types';
 import { INITIAL_GAMES, STEAM_APP_IDS, getGameColor } from './constants';
 import { DEFAULT_SETTINGS } from './types';
-import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping, preloadPrices } from './utils/steam';
+import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping, preloadPrices, getMappingSuggestions, type MappingSuggestion } from './utils/steam';
 import type { SteamSearchResult } from './utils/steam';
 import FortuneWheel from './components/FortuneWheel';
 import SettingsPanel from './components/SettingsPanel';
 import HistoryPanel from './components/HistoryPanel';
 import SteamGameSelectionModal from './components/SteamGameSelectionModal';
 import WinScreenSteamGameSelectionModal from './components/WinScreenSteamGameSelectionModal';
-import { Trophy, RefreshCcw, Coins, Search, Plus, X, Settings as SettingsIcon, History as HistoryIcon, File, Trash2, Link2, Check } from 'lucide-react';
+import { Trophy, RefreshCcw, Coins, Search, Plus, X, Settings as SettingsIcon, History as HistoryIcon, File, Trash2, Link2, Check, Edit2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Функция для создания звуков с помощью Web Audio API
@@ -93,6 +93,9 @@ function App() {
   const [preloadProgress, setPreloadProgress] = useState(0);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [editForm, setEditForm] = useState<{ name: string; appId: string; color: string; image: string; }>({ name: '', appId: '', color: '#ffffff', image: '' });
+  // State for mapping suggestions
+  const [mappingSuggestions, setMappingSuggestions] = useState<{ [gameId: string]: MappingSuggestion[] }>({});
+  const [showMappingSuggestionsFor, setShowMappingSuggestionsFor] = useState<string | null>(null);
 
   const clearAll = () => {
     setSettings(DEFAULT_SETTINGS);
@@ -118,7 +121,7 @@ function App() {
       const response = await fetch(`${API_URL}/api/shares`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: encodedState })
+        body: JSON.stringify({ state: state }) // Send actual state object, not encoded
       });
 
       if (response.ok) {
@@ -189,6 +192,57 @@ function App() {
     setPreloading(false);
   };
 
+  // Helper function to fetch mapping suggestions for a game
+  const fetchMappingSuggestionsForGame = async (game: Game) => {
+    if (game.appId) return; // Already mapped
+    const { suggestions } = await getMappingSuggestions(game.name);
+    setMappingSuggestions(prev => ({ ...prev, [game.id]: suggestions }));
+  };
+
+  // Handle applying a mapping suggestion to game
+  const handleApplyMappingSuggestion = async (gameId: string, appId: string) => {
+    // Find game
+    const game = games.find(g => g.id === gameId);
+    if (!game) return;
+
+    // Save mapping (globally!)
+    const success = await saveGameMapping(game.name, appId);
+    if (success) {
+      // Update game locally
+      const updatedGames = games.map(g => g.id === gameId ? { ...g, appId: appId } : g);
+      setGames(updatedGames);
+
+      // Fetch price for this game
+      if (settings.steam.enableIntegration) {
+        setLoadingPrices(true);
+        try {
+          const priceData = await fetchSteamPrice(appId, settings);
+          if (priceData) {
+            const finalUpdatedGames = updatedGames.map(g => g.id === gameId ? {
+              ...g,
+              price: priceData.price,
+              discount: priceData.discount,
+              originalPrice: priceData.originalPrice
+            } : g);
+            setGames(finalUpdatedGames);
+          }
+        } catch (error) {
+          console.error('Error fetching price:', error);
+        } finally {
+          setLoadingPrices(false);
+        }
+      }
+
+      // Clear suggestions for this game
+      setShowMappingSuggestionsFor(null);
+      setMappingSuggestions(prev => {
+        const newSuggestions = { ...prev };
+        delete newSuggestions[gameId];
+        return newSuggestions;
+      });
+    }
+  };
+
   const saveEditedGame = () => {
     // Placeholder for saving edited game logic
     console.log('Saving edited game:', editingGame, editForm);
@@ -205,14 +259,19 @@ function App() {
   };
 
   const handleSteamGameSelect = async (selectedAppId: string | undefined) => {
+    let priceData: any = undefined;
     if (selectedAppId) {
       await saveGameMapping(gameNameToMap, selectedAppId);
+      if (settings.steam.enableIntegration) {
+        priceData = await fetchSteamPrice(selectedAppId, settings);
+      }
     }
     const newGame: Game = {
       id: Math.random().toString(36).substr(2, 9),
       name: gameNameToMap,
       appId: selectedAppId,
-      color: getGameColor(games.length) // Use current length for color calculation
+      color: getGameColor(games.length), // Use current length for color calculation
+      ...priceData
     };
     setGames([...games, newGame]);
     setNewGameName(''); // Clear new game input
@@ -260,6 +319,18 @@ function App() {
   const { playSpinSound, playWinSound } = useAudio();
 
   const API_URL = import.meta.env.VITE_API_URL;
+
+  // Fetch mapping suggestions for unmapped games when games list changes
+  useEffect(() => {
+    if (!initialized) return;
+
+    // Fetch suggestions for all unmapped games
+    for (const game of games) {
+      if (!game.appId && !mappingSuggestions[game.id]) {
+        fetchMappingSuggestionsForGame(game);
+      }
+    }
+  }, [games, initialized, mappingSuggestions]);
 
   // Инициализация при первом запуске
   useEffect(() => {
@@ -485,12 +556,65 @@ function App() {
         }));
       }
 
+      // 4. Try to auto-map games using existing DB mappings (or most popular mappings)
+      const mappedGames = await Promise.all(loadedGames.map(async game => {
+        if (game.appId) return game; // Already mapped, skip
+
+        // Try to get existing mapping first
+        const { existing, suggestions } = await getMappingSuggestions(game.name);
+        if (existing) {
+          return { ...game, appId: existing };
+        }
+
+        // If no existing mapping, try the most used one
+        const mostUsed = suggestions.find(s => s.isMostUsed);
+        if (mostUsed) {
+          return { ...game, appId: mostUsed.appId };
+        }
+
+        return game;
+      }));
+
       setSettings(loadedSettings);
-      setGames(loadedGames);
+      setGames(mappedGames);
       setHistory(loadedHistory);
       setInitialized(true);
       setDbStatus('connected');
       setDbError(null);
+
+      // Preload prices for loaded games
+      if (loadedSettings.steam.enableIntegration) {
+        const gamesWithAppId = mappedGames.filter(g => g.appId);
+        const appIds = gamesWithAppId.map(g => g.appId as string);
+        if (appIds.length > 0) {
+          setPreloading(true);
+          const priceResults = await preloadPrices(appIds, loadedSettings.steam.region, false);
+          const currencySymbol = {
+            'KZT': '₸',
+            'USD': '$',
+            'EUR': '€',
+            'RUB': '₽'
+          }[loadedSettings.steam.currency] || '';
+
+          const updatedGames = mappedGames.map(game => {
+            if (game.appId && priceResults[game.appId]) {
+              const data = priceResults[game.appId];
+              const priceData: any = {};
+              if (data.price != null) {
+                priceData.price = `${data.price} ${currencySymbol}`.trim();
+              }
+              if (data.discount != null && data.discount > 0 && data.originalPrice != null) {
+                priceData.discount = `-${data.discount}%`;
+                priceData.originalPrice = `${data.originalPrice} ${currencySymbol}`.trim();
+              }
+              return { ...game, ...priceData };
+            }
+            return game;
+          });
+          setGames(updatedGames);
+          setPreloading(false);
+        }
+      }
       
       // Очищаем URL от state параметра, чтобы не дублировать при перезагрузке
       if (stateParam) {
@@ -543,12 +667,15 @@ function App() {
 
     const gameName = newGameName.trim();
     let appId: string | undefined = undefined;
+    let priceData: any = undefined;
 
     if (settings.steam.enableIntegration) {
       // 1. Try to get mapping from DB
       const dbMapping = await getGameMapping(gameName);
       if (dbMapping) {
         appId = dbMapping.app_id;
+        // Fetch price immediately
+        priceData = await fetchSteamPrice(appId, settings);
       } else {
         // 2. Search Steam for the game
         const searchResults = await searchSteamGames(gameName);
@@ -557,6 +684,8 @@ function App() {
           appId = searchResults[0].appId;
           // Save this new mapping to DB
           await saveGameMapping(gameName, appId);
+          // Fetch price
+          priceData = await fetchSteamPrice(appId, settings);
         } else if (searchResults.length > 1) {
           // Show modal for user to choose
           setSteamSearchResults(searchResults);
@@ -572,7 +701,8 @@ function App() {
       id: Math.random().toString(36).substr(2, 9),
       name: gameName,
       appId: appId,
-      color: getGameColor(games.length)
+      color: getGameColor(games.length),
+      ...priceData
     };
     setGames([...games, newGame]);
     setNewGameName('');
@@ -674,27 +804,137 @@ function App() {
     >
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 relative z-10">
         
-        <div className="lg:col-span-1 space-y-6 bg-slate-800/70 backdrop-blur-md p-6 rounded-2xl border border-slate-700 h-fit">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <Coins className="text-yellow-400" />
-              Список игр ({games.length})
-            </h2>
-            <div className="flex gap-2">
-              <button onClick={() => setImportOpen(true)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition" title="Импорт игр">
+        <div className="lg:col-span-2 flex flex-col items-center justify-center space-y-8 relative px-4 order-1 lg:order-2">
+          <div className="text-center space-y-4">
+            <h1 className="text-2xl md:text-5xl lg:text-7xl font-black bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent drop-shadow-lg">
+              {settings.titles.main}
+            </h1>
+            <p className="text-slate-200 font-medium text-sm md:text-xl">{settings.titles.subtitle}</p>
+          </div>
+
+          <div className="relative">
+            <FortuneWheel 
+              games={games} 
+              onResult={handleResult} 
+              isSpinning={isSpinning} 
+              setIsSpinning={setIsSpinning}
+              settings={settings}
+              onSpinStart={handleSpinStart}
+              isWinPopupOpen={selectedGame !== null}
+            />
+          </div>
+
+          {/* Модалка с результатом по центру колеса */}
+          <AnimatePresence>
+            {selectedGame && !isSpinning && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                transition={{ type: 'spring', damping: 15 }}
+                className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+              >
+                {/* Backdrop */}
+                <div className="absolute inset-0 bg-black/60" onClick={() => setSelectedGame(null)} />
+                <div className="relative bg-slate-900/95 backdrop-blur-lg p-6 rounded-2xl shadow-2xl border border-white/20 w-full max-w-sm sm:max-w-md">
+                  <div className="flex justify-end mb-2">
+                    <button onClick={() => setSelectedGame(null)} className="text-white/60 hover:text-white transition-colors p-2">
+                      <X size={24} />
+                    </button>
+                  </div>
+                  
+                  <div className="flex flex-col items-center text-center space-y-4 relative z-10">
+                    <div className="bg-yellow-400 p-4 rounded-full shadow-lg animate-bounce">
+                      <Trophy className="text-slate-900" size={40} />
+                    </div>
+                    
+                    <div>
+                      <h3 className="text-white/70 uppercase tracking-widest text-xs font-bold mb-1">Выпавшая игра</h3>
+                      <h2 className="text-2xl sm:text-3xl font-black text-white">{selectedGame.name}</h2>
+                    </div>
+
+                    {(settings.prices.showPrices || settings.prices.showDiscounts) && (
+                      <div className="w-full bg-black/20 backdrop-blur-md p-4 rounded-2xl border border-white/10 mt-4">
+                        {loadingPrices ? (
+                          <div className="flex items-center justify-center gap-2 py-2">
+                            <RefreshCcw className="animate-spin text-indigo-300" size={24} />
+                            <span className="text-lg font-medium">Загрузка...</span>
+                          </div>
+                        ) : selectedGame.price ? (
+                          <>
+                            <div className="flex items-center justify-center gap-2 text-indigo-200 mb-1">
+                              <Coins size={20} />
+                              <span className="text-sm font-semibold uppercase tracking-wider">Цена</span>
+                            </div>
+                            <div className="flex items-center justify-center gap-4 flex-wrap">
+                              {selectedGame.originalPrice && settings.prices.showDiscounts && (
+                                <span className="text-lg text-slate-400 line-through">{selectedGame.originalPrice}</span>
+                              )}
+                              <span className="text-3xl sm:text-4xl font-bold text-white tracking-tight">{selectedGame.price}</span>
+                              {selectedGame.discount && settings.prices.showDiscounts && (
+                                <span className="text-lg font-bold text-yellow-300 bg-yellow-500/30 px-3 py-1 rounded">{selectedGame.discount}</span>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-indigo-200/60 py-2 italic">
+                            {selectedGame.appId ? 'Цена не найдена' : 'Не в Steam'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedGame.appId && settings.steam.enableIntegration && (
+                      <a
+                        href={`https://store.steampowered.com/app/${selectedGame.appId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-white/80 hover:text-white text-sm transition-colors mt-2 underline underline-offset-4"
+                      >
+                        Смотреть в Steam
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Декоративный фон */}
+                  <div className="absolute inset-0 -z-10 overflow-hidden rounded-2xl">
+                    <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-indigo-500/20 rounded-full blur-3xl" />
+                    <div className="absolute -top-10 -right-10 w-40 h-40 bg-purple-500/20 rounded-full blur-3xl" />
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="lg:col-span-1 space-y-6 bg-slate-800/70 backdrop-blur-md p-6 rounded-2xl border border-slate-700 h-fit order-2 lg:order-1">
+          <div className="flex flex-col gap-3 mb-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Coins className="text-yellow-400" />
+                Список игр ({games.length})
+              </h2>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setImportOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Импорт игр">
                 <File size={20} />
+                <span className="text-sm hidden sm:inline">Импорт</span>
               </button>
-              <button onClick={() => setConfirmClearGamesOpen(true)} className="text-slate-400 hover:text-red-400 p-2 rounded-lg hover:bg-slate-700 transition" title="Очистить список игр">
+              <button onClick={() => setConfirmClearGamesOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-red-400 p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Очистить список игр">
                 <Trash2 size={20} />
+                <span className="text-sm hidden sm:inline">Очистить</span>
               </button>
-              <button onClick={handleCopyLink} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition" title="Короткая ссылка">
+              <button onClick={handleCopyLink} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Короткая ссылка">
                 {linkCopied ? <Check size={20} /> : <Link2 size={20} />}
+                <span className="text-sm hidden sm:inline">{linkCopied ? 'Скопировано' : 'Ссылка'}</span>
               </button>
-              <button onClick={() => setHistoryOpen(true)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition" title="История">
+              <button onClick={() => setHistoryOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="История">
                 <HistoryIcon size={20} />
+                <span className="text-sm hidden sm:inline">История</span>
               </button>
-              <button onClick={() => setSettingsOpen(true)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition" title="Настройки">
+              <button onClick={() => setSettingsOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Настройки">
                 <SettingsIcon size={20} />
+                <span className="text-sm hidden sm:inline">Настройки</span>
               </button>
             </div>
           </div>
@@ -725,127 +965,115 @@ function App() {
             {games.map((game) => (
               <div 
                 key={game.id}
-                className="flex items-center justify-between bg-slate-700/50 p-3 rounded-lg border border-slate-600 group"
+                className="flex flex-col bg-slate-700/50 p-3 rounded-lg border border-slate-600"
               >
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: game.color }} />
-                  <div className="overflow-hidden">
-                    <span className="truncate text-sm font-medium block">{game.name}</span>
-                    {settings.prices.showPrices && game.price && (
-                      <span className="text-xs text-green-400 block">{game.price}</span>
-                    )}
+                {editingGame?.id === game.id ? (
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <label className="text-slate-400 text-xs">Название</label>
+                      <input 
+                        type="text" 
+                        value={editForm.name} 
+                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} 
+                        className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white" 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-slate-400 text-xs">Steam App ID</label>
+                      <input 
+                        type="text" 
+                        value={editForm.appId} 
+                        onChange={(e) => setEditForm({ ...editForm, appId: e.target.value })} 
+                        className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white" 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-slate-400 text-xs">Цвет</label>
+                      <input 
+                        type="color" 
+                        value={editForm.color} 
+                        onChange={(e) => setEditForm({ ...editForm, color: e.target.value })} 
+                        className="w-full h-10 rounded" 
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={saveEditedGame} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded text-base font-medium">Сохранить</button>
+                      <button onClick={() => setEditingGame(null)} className="px-6 bg-slate-600 hover:bg-slate-500 text-white py-3 rounded text-base font-medium">Отмена</button>
+                    </div>
                   </div>
-                </div>
-                <button
-                  onClick={() => handleRemoveGame(game.id)}
-                  className="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                >
-                  <X size={16} />
-                </button>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: game.color }} />
+                        <div className="overflow-hidden">
+                          <span className="truncate text-sm font-medium block">{game.name}</span>
+                          {settings.prices.showPrices && game.price && (
+                            <span className="text-xs text-green-400 block">{game.price}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!game.appId && mappingSuggestions[game.id] && mappingSuggestions[game.id].length > 0 && (
+                          <button
+                            onClick={() => setShowMappingSuggestionsFor(game.id)}
+                            className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold px-2 py-1 bg-indigo-900/30 rounded transition-all"
+                          >
+                            Подобрать
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleEditGame(game)}
+                          className="text-slate-400 hover:text-indigo-400 p-2 rounded-lg hover:bg-slate-700 transition-all"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button
+                          onClick={() => handleRemoveGame(game.id)}
+                          className="text-slate-400 hover:text-red-400 p-2 rounded-lg hover:bg-slate-700 transition-all"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+                    </div>
+                    {showMappingSuggestionsFor === game.id && (
+                      <div className="mt-2 space-y-2 bg-slate-800/70 p-3 rounded-lg">
+                        <h4 className="text-xs font-bold text-slate-300 mb-2">Выберите игру:</h4>
+                        {mappingSuggestions[game.id].map((suggestion) => (
+                          <button
+                            key={suggestion.appId}
+                            onClick={() => handleApplyMappingSuggestion(game.id, suggestion.appId)}
+                            className="w-full flex items-center gap-2 p-3 rounded bg-slate-700 hover:bg-slate-600 transition-all text-left"
+                          >
+                            {suggestion.icon && (
+                              <img src={suggestion.icon} alt="" className="w-10 h-10 rounded flex-shrink-0" />
+                            )}
+                            <div className="flex-1">
+                              <span className="text-sm font-medium text-white">{suggestion.name}</span>
+                              <div className="flex gap-1 mt-1">
+                                {suggestion.isExisting && (
+                                  <span className="text-[10px] px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded">Текущий</span>
+                                )}
+                                {suggestion.isMostUsed && (
+                                  <span className="text-[10px] px-1.5 py-0.5 bg-green-900/50 text-green-300 rounded">Популярный</span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setShowMappingSuggestionsFor(null)}
+                          className="mt-2 text-sm text-slate-400 hover:text-white"
+                        >
+                          Отмена
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="lg:col-span-2 flex flex-col items-center justify-center space-y-8 relative px-4">
-          <div className="text-center space-y-4">
-            <h1 className="text-3xl md:text-5xl lg:text-7xl font-black bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent drop-shadow-lg">
-              {settings.titles.main}
-            </h1>
-            <p className="text-slate-200 font-medium text-base md:text-xl">{settings.titles.subtitle}</p>
-          </div>
-
-          <div className="relative">
-            <FortuneWheel 
-              games={games} 
-              onResult={handleResult} 
-              isSpinning={isSpinning} 
-              setIsSpinning={setIsSpinning}
-              settings={settings}
-              onSpinStart={handleSpinStart}
-              isWinPopupOpen={selectedGame !== null}
-            />
-          </div>
-
-          {/* Модалка с результатом по центру колеса */}
-          <AnimatePresence>
-            {selectedGame && !isSpinning && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.5, y: -50 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.5, y: -50 }}
-                transition={{ type: 'spring', damping: 15 }}
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30"
-              >
-                <div className="bg-slate-900/95 backdrop-blur-lg p-8 rounded-3xl shadow-2xl border border-white/20 max-w-sm w-full mx-4">
-                  <div className="flex justify-end mb-2">
-                    <button onClick={() => setSelectedGame(null)} className="text-white/60 hover:text-white transition-colors">
-                      <X size={24} />
-                    </button>
-                  </div>
-                  
-                  <div className="flex flex-col items-center text-center space-y-4 relative z-10">
-                    <div className="bg-yellow-400 p-3 rounded-full shadow-lg animate-bounce">
-                      <Trophy className="text-slate-900" size={32} />
-                    </div>
-                    
-                    <div>
-                      <h3 className="text-white/70 uppercase tracking-widest text-xs font-bold mb-1">Выпавшая игра</h3>
-                      <h2 className="text-2xl font-black text-white">{selectedGame.name}</h2>
-                    </div>
-
-                    {(settings.prices.showPrices || settings.prices.showDiscounts) && (
-                      <div className="w-full bg-black/20 backdrop-blur-md p-4 rounded-2xl border border-white/10 mt-4">
-                        {loadingPrices ? (
-                          <div className="flex items-center justify-center gap-2 py-2">
-                            <RefreshCcw className="animate-spin text-indigo-300" size={20} />
-                            <span className="text-lg font-medium">Загрузка...</span>
-                          </div>
-                        ) : selectedGame.price ? (
-                          <>
-                            <div className="flex items-center justify-center gap-2 text-indigo-200 mb-1">
-                              <Coins size={16} />
-                              <span className="text-sm font-semibold uppercase tracking-wider">Цена</span>
-                            </div>
-                            <div className="flex items-center justify-center gap-4 flex-wrap">
-                              {selectedGame.originalPrice && settings.prices.showDiscounts && (
-                                <span className="text-lg text-slate-400 line-through">{selectedGame.originalPrice}</span>
-                              )}
-                              <span className="text-3xl font-bold text-white tracking-tight">{selectedGame.price}</span>
-                              {selectedGame.discount && settings.prices.showDiscounts && (
-                                <span className="text-lg font-bold text-yellow-300 bg-yellow-500/30 px-2 py-1 rounded">{selectedGame.discount}</span>
-                              )}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-indigo-200/60 py-2 italic">
-                            {selectedGame.appId ? 'Цена не найдена' : 'Не в Steam'}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {selectedGame.appId && settings.steam.enableIntegration && (
-                      <a
-                        href={`https://store.steampowered.com/app/${selectedGame.appId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-white/80 hover:text-white text-sm transition-colors mt-2 underline underline-offset-4"
-                      >
-                        Смотреть в Steam
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Декоративный фон */}
-                  <div className="absolute inset-0 -z-10 overflow-hidden rounded-3xl">
-                    <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-indigo-500/20 rounded-full blur-3xl" />
-                    <div className="absolute -top-10 -right-10 w-40 h-40 bg-purple-500/20 rounded-full blur-3xl" />
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
       </div>
 
