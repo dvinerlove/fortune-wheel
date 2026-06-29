@@ -6,10 +6,11 @@ import { X, Coins } from 'lucide-react';
 interface HistoryPanelProps {
   history: HistoryItem[];
   isOpen: boolean;
-  setIsOpen: (open: boolean) => void;
+  onClose: () => void;
+  onClearHistory: () => void;
 }
 
-const HistoryPanel: React.FC<HistoryPanelProps> = ({ history, isOpen, setIsOpen }) => {
+const HistoryPanel: React.FC<HistoryPanelProps> = ({ history, isOpen, onClose, onClearHistory }) => {
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -24,7 +25,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ history, isOpen, setIsOpen 
           exit={{ opacity: 0, x: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 200 }}
           className="fixed inset-0 bg-black/50 z-50"
-          onClick={() => setIsOpen(false)}
+          onClick={onClose}
         >
           <div 
             className="absolute right-0 top-0 h-full w-full md:w-[500px] bg-slate-800 border-l border-slate-700 shadow-2xl overflow-y-auto"
@@ -34,12 +35,15 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ history, isOpen, setIsOpen 
               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                 История
               </h2>
-              <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700">
+              <button onClick={onClose} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700">
                 <X size={24} />
               </button>
             </div>
 
             <div className="p-6">
+              <button onClick={onClearHistory} className="w-full bg-red-600/50 hover:bg-red-600 text-slate-100 py-2 px-4 rounded-lg transition-colors mb-4">
+                Очистить историю
+              </button>
               {history.length === 0 ? (
                 <div className="text-center py-12 text-slate-400">
                   История прокрутов пуста

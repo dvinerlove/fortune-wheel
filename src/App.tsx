@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import type { Game, Settings, HistoryItem } from './types';
 import { INITIAL_GAMES, STEAM_APP_IDS, getGameColor } from './constants';
 import { DEFAULT_SETTINGS } from './types';
-import { fetchSteamPrice } from './utils/steam';
+import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping } from './utils/steam';
+import type { SteamSearchResult } from './utils/steam';
 import FortuneWheel from './components/FortuneWheel';
 import SettingsPanel from './components/SettingsPanel';
 import HistoryPanel from './components/HistoryPanel';
@@ -87,6 +88,12 @@ function App() {
   const [initialized, setInitialized] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [dbStatus, setDbStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [preloading, setPreloading] = useState(false);
+  const [preloadProgress, setPreloadProgress] = useState(0);
+  const [editingGame, setEditingGame] = useState<Game | null>(null);
+  const [editForm, setEditForm] = useState<{ name: string; appId: string; color: string; image: string; }>({ name: '', appId: '', color: '#ffffff', image: '' });
 
   const clearAll = () => {
     setSettings(DEFAULT_SETTINGS);
@@ -132,6 +139,30 @@ function App() {
     await navigator.clipboard.writeText(url.toString());
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  const handlePreloadPrices = async () => {
+    // Placeholder for preloading prices logic
+    setPreloading(true);
+    console.log('Preloading prices...');
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
+    setPreloadProgress(100);
+    setPreloading(false);
+  };
+
+  const saveEditedGame = () => {
+    // Placeholder for saving edited game logic
+    console.log('Saving edited game:', editingGame, editForm);
+    if (editingGame) {
+      setGames(games.map(g => g.id === editingGame.id ? { ...g, ...editForm } : g));
+      setEditingGame(null);
+    }
+  };
+
+  const handleEditGame = (game: Game) => {
+    // Placeholder for handling game edit
+    setEditingGame(game);
+    setEditForm({ name: game.name, appId: game.appId || '', color: game.color, image: game.image || '' });
   };
 
   const handleSteamGameSelect = async (selectedAppId: string | undefined) => {
@@ -255,7 +286,8 @@ function App() {
             throw new Error('API share not found');
           }
         } catch (err) {
-          console.warn('Failed to load from API, falling back to localStorage:', err);
+          setDbStatus('disconnected');
+          setDbError('Не удалось загрузить из API. Проверьте подключение.');
           // Fallback to localStorage
           try {
             const shareDB = JSON.parse(localStorage.getItem('shareDB') || '{}');
@@ -419,6 +451,8 @@ function App() {
       setHistory(loadedHistory);
       setInitialized(true);
       setIsConnected(true);
+      setDbStatus('connected');
+      setDbError(null);
       
       // Очищаем URL от state параметра, чтобы не дублировать при перезагрузке
       if (stateParam) {
@@ -435,7 +469,15 @@ function App() {
     localStorage.setItem('fortuneWheelSettings', JSON.stringify(settings));
     localStorage.setItem('fortuneWheelGames', JSON.stringify(games));
     localStorage.setItem('fortuneWheelHistory', JSON.stringify(history));
-  }, [settings, games, history, initialized]);
+
+    if (API_URL) {
+      setDbStatus('connected');
+      setDbError(null);
+    } else {
+      setDbStatus('disconnected');
+      setDbError('API URL не настроен. Проверьте переменную окружения VITE_API_URL.');
+    }
+  }, [settings, games, history, initialized, API_URL]);
 
   const handleAddGame = async () => {
     if (!newGameName.trim()) return;
@@ -758,6 +800,17 @@ function App() {
         isOpen={settingsOpen}
         setIsOpen={setSettingsOpen}
         clearAll={clearAll}
+        dbStatus={dbStatus}
+        dbError={dbError}
+        preloading={preloading}
+        preloadProgress={preloadProgress}
+        handlePreloadPrices={handlePreloadPrices}
+        editingGame={editingGame}
+        setEditingGame={setEditingGame}
+        editForm={editForm}
+        setEditForm={setEditForm}
+        saveEditedGame={saveEditedGame}
+        handleEditGame={handleEditGame}
       />
 
       <HistoryPanel

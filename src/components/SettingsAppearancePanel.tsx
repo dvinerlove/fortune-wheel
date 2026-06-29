@@ -1,17 +1,17 @@
 import React from 'react';
 import type { Settings } from '../types';
-import { Volume2, VolumeX, Palette, Zap, Settings as SettingsIcon } from 'lucide-react';
+import { Settings as SettingsIcon, Palette, Volume2, VolumeX, Zap } from 'lucide-react';
 
 interface SettingsAppearancePanelProps {
   settings: Settings;
   setSettings: React.Dispatch<React.SetStateAction<Settings>>;
-  clearAll: () => void; // Add clearAll to props
+  clearAll: () => void;
 }
 
 const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
   settings,
   setSettings,
-  clearAll
+  clearAll,
 }) => {
   return (
     <div className="space-y-8">
@@ -27,19 +27,19 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
             </div>
             <input type="checkbox" checked={settings.sound.enabled} onChange={(e) => setSettings({ ...settings, sound: { ...settings.sound, enabled: e.target.checked } })} className="w-5 h-5 accent-indigo-500" />
           </label>
-          
+
           {settings.sound.enabled && (
             <div className="space-y-2 pt-2">
               <div className="flex items-center justify-between">
                 <label className="text-slate-300 text-sm">Громкость</label>
                 <span className="text-slate-400 text-sm">{Math.round(settings.sound.volume * 100)}%</span>
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="1" 
-                step="0.05" 
-                value={settings.sound.volume} 
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={settings.sound.volume}
                 onChange={(e) => setSettings({ ...settings, sound: { ...settings.sound, volume: Number(e.target.value) } })}
                 className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
               />
@@ -120,52 +120,52 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
               </div>
               <div className="space-y-1 col-span-1">
                 <label className="text-slate-400 text-xs">Прозр. подложки</label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.05" 
-                  value={settings.customization.wheelBgOpacity} 
-                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, wheelBgOpacity: Number(e.target.value) } })} 
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={settings.customization.wheelBgOpacity}
+                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, wheelBgOpacity: Number(e.target.value) } })}
                   className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 />
                 <div className="text-slate-400 text-xs text-center">{Math.round(settings.customization.wheelBgOpacity * 100)}%</div>
               </div>
               <div className="space-y-1 col-span-1">
                 <label className="text-slate-400 text-xs">Прозр. изображения</label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.05" 
-                  value={settings.customization.wheelImageOpacity} 
-                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, wheelImageOpacity: Number(e.target.value) } })} 
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={settings.customization.wheelImageOpacity}
+                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, wheelImageOpacity: Number(e.target.value) } })}
                   className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 />
                 <div className="text-slate-400 text-xs text-center">{Math.round(settings.customization.wheelImageOpacity * 100)}%</div>
               </div>
               <div className="space-y-1 col-span-1">
                 <label className="text-slate-400 text-xs">Прозр. цветов</label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.05" 
-                  value={settings.customization.colorOpacity} 
-                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, colorOpacity: Number(e.target.value) } })} 
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={settings.customization.colorOpacity}
+                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, colorOpacity: Number(e.target.value) } })}
                   className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 />
                 <div className="text-slate-400 text-xs text-center">{Math.round(settings.customization.colorOpacity * 100)}%</div>
               </div>
               <div className="space-y-1 col-span-1">
                 <label className="text-slate-400 text-xs">Прозр. линий</label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.05" 
-                  value={settings.customization.sectorLineOpacity} 
-                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, sectorLineOpacity: Number(e.target.value) } })} 
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={settings.customization.sectorLineOpacity}
+                  onChange={(e) => setSettings({ ...settings, customization: { ...settings.customization, sectorLineOpacity: Number(e.target.value) } })}
                   className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 />
                 <div className="text-slate-400 text-xs text-center">{Math.round(settings.customization.sectorLineOpacity * 100)}%</div>
@@ -212,13 +212,13 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
               </div>
               <div className="space-y-1 col-span-1">
                 <label className="text-slate-400 text-xs">Толщина обводки</label>
-                <input 
-                  type="number" 
-                  min="0" 
-                  max="3" 
-                  step="0.1" 
-                  value={settings.wheel.textStrokeWidth} 
-                  onChange={(e) => setSettings({ ...settings, wheel: { ...settings.wheel, textStrokeWidth: Number(e.target.value) } })} 
+                <input
+                  type="number"
+                  min="0"
+                  max="3"
+                  step="0.1"
+                  value={settings.wheel.textStrokeWidth}
+                  onChange={(e) => setSettings({ ...settings, wheel: { ...settings.wheel, textStrokeWidth: Number(e.target.value) } })}
                   className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm h-10"
                 />
               </div>
@@ -230,13 +230,13 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
               <label className="text-slate-300 text-sm font-semibold">Длина названий</label>
               <span className="text-slate-400 text-xs">{Math.round(settings.wheel.textTruncationMultiplier * 100)}%</span>
             </div>
-            <input 
-              type="range" 
-              min="0.5" 
-              max="20" 
-              step="0.5" 
-              value={settings.wheel.textTruncationMultiplier} 
-              onChange={(e) => setSettings({ ...settings, wheel: { ...settings.wheel, textTruncationMultiplier: Number(e.target.value) } })} 
+            <input
+              type="range"
+              min="0.5"
+              max="20"
+              step="0.5"
+              value={settings.wheel.textTruncationMultiplier}
+              onChange={(e) => setSettings({ ...settings, wheel: { ...settings.wheel, textTruncationMultiplier: Number(e.target.value) } })}
               className="w-full accent-indigo-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
             />
             <div className="flex justify-between text-slate-500 text-xs">
@@ -248,17 +248,17 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
           <div className="space-y-4 pt-4 border-t border-slate-700">
             <label className="text-slate-300 text-sm font-semibold">Заголовки страницы</label>
             <div className="space-y-2">
-              <input 
-                type="text" 
-                value={settings.titles.main} 
-                onChange={(e) => setSettings({ ...settings, titles: { ...settings.titles, main: e.target.value } })} 
+              <input
+                type="text"
+                value={settings.titles.main}
+                onChange={(e) => setSettings({ ...settings, titles: { ...settings.titles, main: e.target.value } })}
                 className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
                 placeholder="Основной заголовок"
               />
-              <input 
-                type="text" 
-                value={settings.titles.subtitle} 
-                onChange={(e) => setSettings({ ...settings, titles: { ...settings.titles, subtitle: e.target.value } })} 
+              <input
+                type="text"
+                value={settings.titles.subtitle}
+                onChange={(e) => setSettings({ ...settings, titles: { ...settings.titles, subtitle: e.target.value } })}
                 className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
                 placeholder="Подзаголовок"
               />
@@ -266,7 +266,7 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
           </div>
 
           <div className="pt-4 border-t border-slate-700">
-            <button 
+            <button
               onClick={() => {
                 if (confirm('Вы уверены, что хотите сбросить все настройки и очистить список игр?')) {
                   clearAll();
@@ -325,7 +325,3 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
         </div>
       </div>
     </div>
-  );
-};
-
-export default SettingsAppearancePanel;

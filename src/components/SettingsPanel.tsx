@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import type { Game, Settings } from '../types';
+
 import SettingsAppearancePanel from './SettingsAppearancePanel';
 import SettingsIntegrationPanel from './SettingsIntegrationPanel';
 import SettingsDataPanel from './SettingsDataPanel';
-import { Settings as SettingsIcon, Palette, Gamepad2, Tag, Volume2, VolumeX, Zap } from 'lucide-react';
+import { Settings as SettingsIcon, Palette, Gamepad2, Tag, Volume2, VolumeX, Zap, Database, RefreshCcw, Edit2 } from 'lucide-react';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -37,7 +38,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   dbStatus,
   dbError,
   games,
-  setGames,
   preloading,
   preloadProgress,
   handlePreloadPrices,
