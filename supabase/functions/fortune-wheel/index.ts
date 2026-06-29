@@ -137,9 +137,34 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && (pathname === "/shares" || pathname === "/api/shares")) {
       const body = await req.json();
       const shareData = body.state || body.data;
+
+      // Generate a hash of the share data
+      const shareDataString = JSON.stringify(shareData);
+      const encoder = new TextEncoder();
+      const data = encoder.encode(shareDataString);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // Check if a share with this hash already exists
+      const { data: existingShare, error: findError } = await supabase
+        .from("shares")
+        .select("id")
+        .eq("hash", hashHex)
+        .maybeSingle();
+
+      if (!findError && existingShare) {
+        return new Response(
+          JSON.stringify({ shareId: existingShare.id }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // If not, create a new one
       const id = Math.random().toString(36).substring(2, 8);
-      const { error } = await supabase.from("shares").insert({ id, data: shareData });
+      const { error } = await supabase.from("shares").insert({ id, data: shareData, hash: hashHex });
       if (error) throw error;
+
       return new Response(
         JSON.stringify({ shareId: id }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -161,9 +186,13 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && (pathname.startsWith("/price/") || pathname.startsWith("/api/price/"))) {
       const appId = pathname.split("/").pop() || "";
       const region = url.searchParams.get("region") || "kz";
+      const force = url.searchParams.get("force") === "1"; // New: force refresh
       const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
 
-      // Check Supabase first
+      // Check Supabase first, but re-fetch if:
+      // 1) force=1
+      // 2) price or original_price is null
+      // 3) cache is older than 4 days
       const { data: existingPrice, error: selectError } = await supabase
         .from("game_prices")
         .select("*")
@@ -172,7 +201,8 @@ Deno.serve(async (req) => {
         .gte("last_updated", fourDaysAgo)
         .single();
 
-      if (!selectError && existingPrice && existingPrice.price != null) {
+      const useCache = !force && !selectError && existingPrice && existingPrice.price != null && existingPrice.original_price != null;
+      if (useCache) {
         return new Response(
           JSON.stringify({
             price: existingPrice.price,
@@ -199,7 +229,7 @@ Deno.serve(async (req) => {
           app_id: appId,
           price: priceData.price,
           discount: priceData.discount,
-          original_price: priceData.original_price,
+          original_price: priceData.originalPrice, // fixed: use originalPrice
           currency: priceData.currency,
           region: region,
           last_updated: new Date().toISOString()
@@ -214,7 +244,7 @@ Deno.serve(async (req) => {
 
     // Preload multiple prices
     if (req.method === "POST" && (pathname === "/prices/preload" || pathname === "/api/prices/preload")) {
-      const { appIds, region = "kz" } = await req.json();
+      const { appIds, region = "kz", force = false } = await req.json(); // Added force
       const results = [];
       const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -229,7 +259,8 @@ Deno.serve(async (req) => {
           .single();
 
         let priceData = null;
-        if (!selectError && existingPrice) {
+        const useCache = !force && !selectError && existingPrice && existingPrice.price != null && existingPrice.original_price != null;
+        if (useCache) {
           priceData = {
             price: existingPrice.price,
             discount: existingPrice.discount,
@@ -247,7 +278,7 @@ Deno.serve(async (req) => {
                 app_id: appId,
                 price: priceData.price,
                 discount: priceData.discount,
-                original_price: priceData.original_price,
+                original_price: priceData.originalPrice,
                 currency: priceData.currency,
                 region: region,
                 last_updated: new Date().toISOString()

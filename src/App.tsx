@@ -42,25 +42,6 @@ const useAudio = () => {
     oscillator.stop(ctx.currentTime + 0.5);
   };
 
-  const playTickSound = (volume: number = 0.5) => {
-    const ctx = getAudioContext();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    
-    oscillator.type = 'square';
-    oscillator.frequency.setValueAtTime(800, ctx.currentTime);
-    oscillator.frequency.setValueAtTime(400, ctx.currentTime + 0.05);
-    
-    gainNode.gain.setValueAtTime(volume * 0.15, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-    
-    oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + 0.1);
-  };
-
   const playWinSound = (volume: number = 0.5) => {
     const ctx = getAudioContext();
     const frequencies = [440, 554, 659, 880]; // A4, C#5, E5, A5
@@ -83,7 +64,7 @@ const useAudio = () => {
     });
   };
 
-  return { playSpinSound, playTickSound, playWinSound };
+  return { playSpinSound, playWinSound };
 };
 
 function App() {
@@ -235,7 +216,7 @@ function App() {
     setSteamSearchResults([]);
   };
 
-  const { playSpinSound, playTickSound, playWinSound } = useAudio();
+  const { playSpinSound, playWinSound } = useAudio();
 
   const API_URL = import.meta.env.VITE_API_URL;
 
@@ -742,11 +723,6 @@ function App() {
               settings={settings}
               onSpinStart={handleSpinStart}
               isWinPopupOpen={selectedGame !== null}
-              onTick={() => {
-                if (settings.sound.enabled) {
-                  playTickSound(settings.sound.volume);
-                }
-              }}
             />
           </div>
 
