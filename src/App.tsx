@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { Game, Settings, HistoryItem } from './types';
 import { INITIAL_GAMES, STEAM_APP_IDS, getGameColor } from './constants';
 import { DEFAULT_SETTINGS } from './types';
-import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping } from './utils/steam';
+import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping, preloadPrices } from './utils/steam';
 import type { SteamSearchResult } from './utils/steam';
 import FortuneWheel from './components/FortuneWheel';
 import SettingsPanel from './components/SettingsPanel';
@@ -140,10 +140,51 @@ function App() {
   };
 
   const handlePreloadPrices = async () => {
-    // Placeholder for preloading prices logic
     setPreloading(true);
+    setPreloadProgress(0);
     console.log('Preloading prices...');
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
+    
+    const gamesWithAppId = games.filter(g => g.appId);
+    const appIds = gamesWithAppId.map(g => g.appId as string);
+    
+    if (appIds.length === 0) {
+      setPreloading(false);
+      return;
+    }
+
+    // Format currency symbol
+    const currencySymbol = {
+      'KZT': '₸',
+      'USD': '$',
+      'EUR': '€',
+      'RUB': '₽'
+    }[settings.steam.currency] || '';
+
+    // Preload prices
+    const priceResults = await preloadPrices(appIds, settings.steam.region, true); // force true
+    const newGames = [...games];
+    let processed = 0;
+
+    for (const game of newGames) {
+      if (game.appId && priceResults[game.appId]) {
+        const priceData = priceResults[game.appId];
+        const result: any = {};
+        if (priceData.price != null) {
+          result.price = `${priceData.price} ${currencySymbol}`.trim();
+        }
+        if (priceData.discount != null && priceData.discount > 0 && priceData.originalPrice != null) {
+          result.discount = `-${priceData.discount}%`;
+          result.originalPrice = `${priceData.originalPrice} ${currencySymbol}`.trim();
+        }
+        game.price = result.price;
+        game.discount = result.discount;
+        game.originalPrice = result.originalPrice;
+      }
+      processed++;
+      setPreloadProgress(Math.round((processed / newGames.length) * 100));
+    }
+
+    setGames(newGames);
     setPreloadProgress(100);
     setPreloading(false);
   };

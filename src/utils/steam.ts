@@ -6,6 +6,12 @@ interface SteamPriceData {
   originalPrice?: string;
 }
 
+interface RawSteamPriceData {
+  price?: number;
+  discount?: number;
+  originalPrice?: number;
+}
+
 export interface SteamSearchResult {
   appId: string;
   name: string;
@@ -164,5 +170,37 @@ export async function saveGameMapping(gameName: string, appId: string): Promise<
     return response.ok;
   } catch (error) {
     return false;
+  }
+}
+
+export async function preloadPrices(appIds: string[], region: string, force: boolean = false): Promise<{ [appId: string]: RawSteamPriceData }> {
+  try {
+    const response = await fetch(`${API_URL}/api/prices/preload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appIds, region, force })
+    });
+
+    if (!response.ok) return {};
+
+    const data = await response.json();
+    const results: { [appId: string]: RawSteamPriceData } = {};
+
+    if (data && data.results) {
+      for (const result of data.results) {
+        if (result.data) {
+          results[result.appId] = {
+            price: result.data.price,
+            discount: result.data.discount,
+            originalPrice: result.data.originalPrice
+          };
+        }
+      }
+    }
+
+    return results;
+  } catch (error) {
+    console.error('Error preloading prices:', error);
+    return {};
   }
 }
