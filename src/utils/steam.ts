@@ -6,7 +6,20 @@ interface SteamPriceData {
   originalPrice?: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+interface SteamSearchResult {
+  appId: string;
+  name: string;
+  icon: string;
+}
+
+interface GameMapping {
+  game_name: string;
+  app_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const API_URL = import.meta.env.VITE_API_URL || 'https://tyxlbygyynhdxcexgaxf.functions.supabase.co/fortune-wheel';
 
 export async function fetchSteamPrice(
   appId: string, 
@@ -133,5 +146,41 @@ export async function fetchSteamPrice(
       console.error('Error details:', error.message, error.stack);
     }
     return undefined;
+  }
+}
+
+export async function searchSteamGames(query: string): Promise<SteamSearchResult[]> {
+  try {
+    const response = await fetch(`${API_URL}/api/steam/search?q=${encodeURIComponent(query)}`);
+    if (!response.ok) return [];
+    return await response.json();
+  } catch (error) {
+    console.error('Error searching Steam:', error);
+    return [];
+  }
+}
+
+export async function getGameMapping(gameName: string): Promise<GameMapping | null> {
+  try {
+    const response = await fetch(`${API_URL}/api/mappings?gameName=${encodeURIComponent(gameName)}`);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting game mapping:', error);
+    return null;
+  }
+}
+
+export async function saveGameMapping(gameName: string, appId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_URL}/api/mappings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameName, appId })
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('Error saving game mapping:', error);
+    return false;
   }
 }

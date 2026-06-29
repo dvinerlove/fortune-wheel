@@ -34,9 +34,26 @@ async function fetchSteamPriceFromAPI(appId: string, region: string) {
   return {
     price: priceData.final / 100,
     discount: priceData.discount_percent,
-    original_price: priceData.initial / 100,
+    originalPrice: priceData.initial / 100,
     currency: priceData.currency
   };
+}
+
+// Helper to search Steam for games
+async function searchSteamGames(query: string) {
+  try {
+    const url = `https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(query)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    return data.slice(0, 10).map((item: any) => ({
+      appId: item.appid,
+      name: item.name,
+      icon: `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${item.appid}/${item.img_icon_url}.jpg`
+    }));
+  } catch (error) {
+    console.error("Steam search failed:", error);
+    return [];
+  }
 }
 
 Deno.serve(async (req) => {
@@ -92,6 +109,42 @@ Deno.serve(async (req) => {
       
       return new Response(
         JSON.stringify({ status: "ok", database: "connected", supabaseUrl: SUPABASE_URL }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Steam search
+    if (req.method === "GET" && (pathname === "/api/steam/search" || pathname === "/steam/search")) {
+      const url = new URL(req.url);
+      const query = url.searchParams.get("q") || "";
+      const results = await searchSteamGames(query);
+      return new Response(
+        JSON.stringify(results),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Get game mapping
+    if (req.method === "GET" && (pathname === "/api/mappings" || pathname === "/mappings")) {
+      const url = new URL(req.url);
+      const gameName = url.searchParams.get("gameName") || "";
+      const decodedName = decodeURIComponent(gameName);
+      const { data, error } = await supabase.from("game_mappings").select("*").eq("game_name", decodedName).maybeSingle();
+      if (error) console.error("Get mapping error:", error);
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Save game mapping
+    if (req.method === "POST" && (pathname === "/api/mappings" || pathname === "/mappings")) {
+      const { gameName, appId } = await req.json();
+      const decodedName = decodeURIComponent(gameName);
+      const { error } = await supabase.from("game_mappings").upsert({ game_name: decodedName, app_id: appId, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
