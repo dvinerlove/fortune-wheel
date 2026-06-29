@@ -6,7 +6,9 @@ import { fetchSteamPrice } from './utils/steam';
 import FortuneWheel from './components/FortuneWheel';
 import SettingsPanel from './components/SettingsPanel';
 import HistoryPanel from './components/HistoryPanel';
-import { Trophy, RefreshCcw, Coins, Search, Plus, X, Settings as SettingsIcon, History as HistoryIcon, File, Trash2 } from 'lucide-react';
+import SteamGameSelectionModal from './components/SteamGameSelectionModal';
+import WinScreenSteamGameSelectionModal from './components/WinScreenSteamGameSelectionModal';
+import { Trophy, RefreshCcw, Coins, Search, Plus, X, Settings as SettingsIcon, History as HistoryIcon, File, Trash2, Link2, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Функция для создания звуков с помощью Web Audio API
@@ -75,9 +77,16 @@ function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [confirmClearGamesOpen, setConfirmClearGamesOpen] = useState(false);
+  const [steamSearchResults, setSteamSearchResults] = useState<SteamSearchResult[]>([]);
+  const [showSteamSearchResultsModal, setShowSteamSearchResultsModal] = useState(false);
+  const [gameNameToMap, setGameNameToMap] = useState<string>('');
+  const [showWinScreenMappingModal, setShowWinScreenMappingModal] = useState(false);
+  const [gameToMapOnWinScreen, setGameToMapOnWinScreen] = useState<Game | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [initialized, setInitialized] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const clearAll = () => {
     setSettings(DEFAULT_SETTINGS);
@@ -87,12 +96,100 @@ function App() {
     localStorage.removeItem('fortuneWheelGames');
     localStorage.removeItem('fortuneWheelHistory');
     // Don't clear shareDB so saved share links still work!
-    console.log('Cleared settings, games, and history, kept shareDB intact');
+  };
+
+  const handleCopyLink = async () => {
+    const url = new URL(window.location.href);
+    const params = new URLSearchParams(url.search);
+
+    const state = {
+      settings,
+      games: games.map(game => ({ name: game.name, appId: game.appId })) // Only save necessary game data
+    };
+    const encodedState = btoa(encodeURIComponent(JSON.stringify(state)));
+
+    // Try to save to DB
+    try {
+      const response = await fetch(`${API_URL}/api/shares`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: encodedState })
+      });
+
+      if (response.ok) {
+        const { shareId } = await response.json();
+        url.searchParams.set('share', shareId);
+        url.searchParams.delete('state'); // Remove old state param if exists
+      } else {
+        throw new Error('Failed to save to API');
+      }
+    } catch (error) {
+      // Fallback to old method
+      url.searchParams.set('state', encodedState);
+      url.searchParams.delete('share');
+    }
+
+    await navigator.clipboard.writeText(url.toString());
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  const handleSteamGameSelect = async (selectedAppId: string | undefined) => {
+    if (selectedAppId) {
+      await saveGameMapping(gameNameToMap, selectedAppId);
+    }
+    const newGame: Game = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: gameNameToMap,
+      appId: selectedAppId,
+      color: getGameColor(games.length) // Use current length for color calculation
+    };
+    setGames([...games, newGame]);
+    setNewGameName(''); // Clear new game input
+    setSteamSearchResults([]);
+    setShowSteamSearchResultsModal(false);
+    setGameNameToMap('');
+  };
+
+  const handleWinScreenGameSelect = async (selectedAppId: string | undefined, originalGame: Game) => {
+    if (selectedAppId) {
+      await saveGameMapping(originalGame.name, selectedAppId);
+    }
+
+    const updatedGame = { ...originalGame, appId: selectedAppId };
+    setGames(prevGames => prevGames.map(g => g.id === originalGame.id ? updatedGame : g));
+    setSelectedGame(updatedGame); // Update the selected game on win screen
+
+    // Re-fetch price for the updated game
+    if (updatedGame.appId && settings.steam.enableIntegration) {
+      setLoadingPrices(true);
+      try {
+        const data = await fetchSteamPrice(updatedGame.appId, settings);
+        if (data) {
+          const finalUpdatedGame = { 
+            ...updatedGame, 
+            price: data.price, 
+            discount: data.discount, 
+            originalPrice: data.originalPrice 
+          };
+          setSelectedGame(finalUpdatedGame);
+          setGames(prevGames => prevGames.map(g => g.id === originalGame.id ? finalUpdatedGame : g));
+        }
+      } catch (error) {
+        console.error('Error fetching price on win screen after mapping:', error);
+      } finally {
+        setLoadingPrices(false);
+      }
+    }
+
+    setShowWinScreenMappingModal(false);
+    setGameToMapOnWinScreen(null);
+    setSteamSearchResults([]);
   };
 
   const { playSpinSound, playWinSound } = useAudio();
 
-  const API_URL = import.meta.env.VITE_API_URL || "https://tyxlbygyynhdxcexgaxf.functions.supabase.co/fortune-wheel";
+  const API_URL = import.meta.env.VITE_API_URL;
 
   // Инициализация при первом запуске
   useEffect(() => {
@@ -109,15 +206,12 @@ function App() {
       const shareId = params.get('share');
       const stateParam = params.get('state');
       
-      console.log('URL params - shareId:', shareId, 'stateParam:', stateParam);
-      
       if (shareId) {
         // First try API
         try {
           const response = await fetch(`${API_URL}/api/shares/${shareId}`);
           if (response.ok) {
             const sharedState = await response.json();
-            console.log('Loaded state from API:', sharedState);
             
             if (sharedState.settings) {
               loadedSettings = { 
@@ -157,7 +251,6 @@ function App() {
               loadedGames = sharedState.games;
               loadedFromShare = true;
             }
-            console.log('Loaded from API share link');
           } else {
             throw new Error('API share not found');
           }
@@ -166,9 +259,7 @@ function App() {
           // Fallback to localStorage
           try {
             const shareDB = JSON.parse(localStorage.getItem('shareDB') || '{}');
-            console.log('ShareDB content:', shareDB);
             const sharedState = shareDB[shareId];
-            console.log('Shared state for shareId:', sharedState);
             
             if (sharedState) {
               if (sharedState.settings) {
@@ -209,7 +300,6 @@ function App() {
                 loadedGames = sharedState.games;
                 loadedFromShare = true;
               }
-              console.log('Loaded from localStorage share link');
             }
           } catch (err2) {
             console.error('Failed to load from localStorage:', err2);
@@ -256,7 +346,6 @@ function App() {
             loadedGames = decoded.games;
             loadedFromShare = true;
           }
-          console.log('Loaded from old share link');
         } catch (err) {
           console.error('Failed to parse shared state:', err);
         }
@@ -310,7 +399,6 @@ function App() {
           if (savedHistory) {
             loadedHistory = JSON.parse(savedHistory);
           }
-          console.log('Loaded from localStorage');
         } catch (err) {
           console.error('Failed to load from localStorage:', err);
         }
@@ -324,13 +412,13 @@ function App() {
           appId: STEAM_APP_IDS[name],
           color: getGameColor(index)
         }));
-        console.log('Loaded default games');
       }
 
       setSettings(loadedSettings);
       setGames(loadedGames);
       setHistory(loadedHistory);
       setInitialized(true);
+      setIsConnected(true);
       
       // Очищаем URL от state параметра, чтобы не дублировать при перезагрузке
       if (stateParam) {
@@ -349,12 +437,40 @@ function App() {
     localStorage.setItem('fortuneWheelHistory', JSON.stringify(history));
   }, [settings, games, history, initialized]);
 
-  const handleAddGame = () => {
+  const handleAddGame = async () => {
     if (!newGameName.trim()) return;
+
+    const gameName = newGameName.trim();
+    let appId: string | undefined = undefined;
+
+    if (settings.steam.enableIntegration) {
+      // 1. Try to get mapping from DB
+      const dbMapping = await getGameMapping(gameName);
+      if (dbMapping) {
+        appId = dbMapping.app_id;
+      } else {
+        // 2. Search Steam for the game
+        const searchResults = await searchSteamGames(gameName);
+
+        if (searchResults.length === 1) {
+          appId = searchResults[0].appId;
+          // Save this new mapping to DB
+          await saveGameMapping(gameName, appId);
+        } else if (searchResults.length > 1) {
+          // Show modal for user to choose
+          setSteamSearchResults(searchResults);
+          setGameNameToMap(gameName);
+          setShowSteamSearchResultsModal(true);
+          setNewGameName(''); // Clear input while modal is open
+          return; // Exit as user needs to interact with modal
+        }
+      }
+    }
+
     const newGame: Game = {
       id: Math.random().toString(36).substr(2, 9),
-      name: newGameName.trim(),
-      appId: STEAM_APP_IDS[newGameName.trim()],
+      name: gameName,
+      appId: appId,
       color: getGameColor(games.length)
     };
     setGames([...games, newGame]);
@@ -392,13 +508,35 @@ function App() {
     };
     setHistory(h => [...h, historyItem]);
     
-    if (game.appId && !game.price && settings.steam.enableIntegration) {
+    let gameWithAppId = { ...game };
+
+    if (!game.appId && settings.steam.enableIntegration) {
+      // Try to find mapping if appId is missing
+      const dbMapping = await getGameMapping(game.name);
+      if (dbMapping) {
+        gameWithAppId = { ...game, appId: dbMapping.app_id };
+      } else {
+        const searchResults = await searchSteamGames(game.name);
+        if (searchResults.length === 1) {
+          gameWithAppId = { ...game, appId: searchResults[0].appId };
+          await saveGameMapping(game.name, gameWithAppId.appId);
+        } else if (searchResults.length > 1) {
+          setGameToMapOnWinScreen(game);
+          setSteamSearchResults(searchResults);
+          setShowWinScreenMappingModal(true);
+          // Don't proceed with price fetching yet, wait for user selection
+          return; 
+        }
+      }
+    }
+
+    if (gameWithAppId.appId && !gameWithAppId.price && settings.steam.enableIntegration) {
       setLoadingPrices(true);
       try {
-        const data = await fetchSteamPrice(game.appId, settings);
+        const data = await fetchSteamPrice(gameWithAppId.appId, settings);
         if (data) {
           const updatedGame = { 
-            ...game, 
+            ...gameWithAppId, 
             price: data.price, 
             discount: data.discount, 
             originalPrice: data.originalPrice 
@@ -448,6 +586,9 @@ function App() {
               <button onClick={() => setConfirmClearGamesOpen(true)} className="text-slate-400 hover:text-red-400 p-2 rounded-lg hover:bg-slate-700 transition" title="Очистить список игр">
                 <Trash2 size={20} />
               </button>
+              <button onClick={handleCopyLink} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition" title="Короткая ссылка">
+                {linkCopied ? <Check size={20} /> : <Link2 size={20} />}
+              </button>
               <button onClick={() => setHistoryOpen(true)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition" title="История">
                 <HistoryIcon size={20} />
               </button>
@@ -476,6 +617,10 @@ function App() {
               <Plus size={24} />
             </button>
           </div>
+
+          {isConnected && (
+            <p className="text-center text-green-400 text-sm mt-4">Все подключено!</p>
+          )}
 
           <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
             {games.map((game) => (
@@ -616,9 +761,26 @@ function App() {
       />
 
       <HistoryPanel
-        history={history}
         isOpen={historyOpen}
-        setIsOpen={setHistoryOpen}
+        onClose={() => setHistoryOpen(false)}
+        history={history}
+        onClearHistory={() => setHistory([])}
+      />
+
+      <SteamGameSelectionModal
+        isOpen={showSteamSearchResultsModal}
+        onClose={() => setShowSteamSearchResultsModal(false)}
+        gameName={gameNameToMap}
+        searchResults={steamSearchResults}
+        onSelect={handleSteamGameSelect}
+      />
+
+      <WinScreenSteamGameSelectionModal
+        isOpen={showWinScreenMappingModal}
+        onClose={() => setShowWinScreenMappingModal(false)}
+        game={gameToMapOnWinScreen}
+        searchResults={steamSearchResults}
+        onSelect={handleWinScreenGameSelect}
       />
 
       {/* Импорт игр модалка */}

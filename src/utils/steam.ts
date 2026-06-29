@@ -19,7 +19,7 @@ interface GameMapping {
   updated_at: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://tyxlbygyynhdxcexgaxf.functions.supabase.co/fortune-wheel';
+const API_URL = import.meta.env.VITE_API_URL;
 
 export async function fetchSteamPrice(
   appId: string, 
@@ -27,8 +27,6 @@ export async function fetchSteamPrice(
 ): Promise<SteamPriceData | undefined> {
   try {
     if (!settings.steam.enableIntegration) return undefined;
-
-    console.log('Fetching Steam price for appId:', appId);
     
     // Try to use backend API first
     try {
@@ -55,12 +53,11 @@ export async function fetchSteamPrice(
             result.originalPrice = `${data.originalPrice} ${currencySymbol}`.trim();
           }
           
-          console.log('Successfully got price data from backend!');
           return result;
         }
       }
     } catch (apiErr) {
-      console.warn('Backend API failed, falling back to proxies:', apiErr);
+      // Backend API failed, falling back to proxies
     }
     
     // Fallback to proxy method if backend is not available
@@ -76,17 +73,14 @@ export async function fetchSteamPrice(
     for (let i = 0; i < proxies.length; i++) {
       try {
         const proxyUrl = proxies[i];
-        console.log(`Trying proxy ${i + 1}:`, proxyUrl);
         
         const response = await fetch(proxyUrl);
         
         if (!response.ok) {
-          console.warn(`Proxy ${i + 1} returned status:`, response.status);
           continue;
         }
         
         const responseText = await response.text();
-        console.log(`Proxy ${i + 1} response (first 300 chars):`, responseText.substring(0, 300));
         
         let data: any;
         // Проверяем, какой формат у ответа
@@ -95,19 +89,15 @@ export async function fetchSteamPrice(
             const proxyData = JSON.parse(responseText);
             data = JSON.parse(proxyData.contents);
           } catch (parseErr) {
-            console.warn('Failed to parse allorigins get response');
             continue;
           }
         } else {
           try {
             data = JSON.parse(responseText);
           } catch (parseErr) {
-            console.warn('Failed to parse raw response');
             continue;
           }
         }
-        
-        console.log('Parsed data:', data);
         
         // Парсим данные
         if (data && data[appId] && data[appId].success) {
@@ -128,23 +118,16 @@ export async function fetchSteamPrice(
               result.originalPrice = priceOverview.initial_formatted;
             }
             
-            console.log('Successfully got price data!');
             return result;
           }
         }
       } catch (proxyErr) {
-        console.warn(`Proxy ${i + 1} failed:`, proxyErr);
         continue;
       }
     }
 
-    console.warn('All proxies failed to get price data');
     return undefined;
   } catch (error) {
-    console.error('Error fetching steam price:', error);
-    if (error instanceof Error) {
-      console.error('Error details:', error.message, error.stack);
-    }
     return undefined;
   }
 }
@@ -155,7 +138,6 @@ export async function searchSteamGames(query: string): Promise<SteamSearchResult
     if (!response.ok) return [];
     return await response.json();
   } catch (error) {
-    console.error('Error searching Steam:', error);
     return [];
   }
 }
@@ -166,7 +148,6 @@ export async function getGameMapping(gameName: string): Promise<GameMapping | nu
     if (!response.ok) return null;
     return await response.json();
   } catch (error) {
-    console.error('Error getting game mapping:', error);
     return null;
   }
 }
@@ -180,7 +161,6 @@ export async function saveGameMapping(gameName: string, appId: string): Promise<
     });
     return response.ok;
   } catch (error) {
-    console.error('Error saving game mapping:', error);
     return false;
   }
 }

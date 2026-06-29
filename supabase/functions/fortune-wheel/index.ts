@@ -2,13 +2,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
-console.log("Hello from Functions!");
-
 // Initialize Supabase client
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-console.log("SUPABASE_URL is set:", !!SUPABASE_URL);
-console.log("SUPABASE_SERVICE_ROLE_KEY is set:", !!SUPABASE_SERVICE_ROLE_KEY);
 
 const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -51,25 +47,18 @@ async function searchSteamGames(query: string) {
       icon: `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${item.appid}/${item.img_icon_url}.jpg`
     }));
   } catch (error) {
-    console.error("Steam search failed:", error);
     return [];
   }
 }
 
 Deno.serve(async (req) => {
-  console.log("=== NEW REQUEST ===");
-  console.log("Method:", req.method);
-  console.log("URL:", req.url);
-  
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
-    console.log("Handling OPTIONS preflight");
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
     const url = new URL(req.url);
-    console.log("Full pathname:", url.pathname);
     
     // Let's extract the path after the function name
     // Possible function URLs:
@@ -86,8 +75,6 @@ Deno.serve(async (req) => {
       pathname = pathname.slice(idx + functionName.length) || "/";
     }
     
-    console.log("Final processed pathname:", pathname);
-
     // Health check - handle ANY path that might be a health check
     if (
       pathname === "/" || 
@@ -95,12 +82,9 @@ Deno.serve(async (req) => {
       pathname === "/api/health" ||
       pathname.includes("health")
     ) {
-      console.log("RUNNING HEALTH CHECK");
       const { data, error } = await supabase.from("shares").select("id").limit(1);
-      console.log("Health check query - data:", data, "error:", error);
       
       if (error) {
-        console.error("Health check ERROR:", error);
         return new Response(
           JSON.stringify({ status: "error", error: error.message }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -130,7 +114,7 @@ Deno.serve(async (req) => {
       const gameName = url.searchParams.get("gameName") || "";
       const decodedName = decodeURIComponent(gameName);
       const { data, error } = await supabase.from("game_mappings").select("*").eq("game_name", decodedName).maybeSingle();
-      if (error) console.error("Get mapping error:", error);
+      if (error) { /* handle error */ }
       return new Response(
         JSON.stringify(data),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -219,7 +203,7 @@ Deno.serve(async (req) => {
           region: region,
           last_updated: new Date().toISOString()
         });
-      if (upsertError) console.error("Upsert error:", upsertError);
+      if (upsertError) { /* handle error */ }
 
       return new Response(
         JSON.stringify(priceData),
@@ -280,7 +264,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log("NO ROUTE MATCHED");
     return new Response(
       JSON.stringify({ 
         error: "Not found", 
@@ -299,9 +282,6 @@ Deno.serve(async (req) => {
       { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
-    console.error("=== FUNCTION ERROR ===");
-    console.error("Message:", error.message);
-    console.error("Stack:", error.stack);
     return new Response(
       JSON.stringify({ error: error.message, stack: error.stack }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }

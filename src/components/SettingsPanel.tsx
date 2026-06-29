@@ -1,270 +1,70 @@
 import React, { useState, useEffect } from 'react';
 import type { Game, Settings } from '../types';
-import { fetchSteamPrice } from '../utils/steam';
-import { Settings as SettingsIcon, Palette, Gamepad2, Tag, RefreshCcw, Edit2, Link2, Check, Zap, Volume2, VolumeX, Database } from 'lucide-react';
+import SettingsAppearancePanel from './SettingsAppearancePanel';
+import SettingsIntegrationPanel from './SettingsIntegrationPanel';
+import SettingsDataPanel from './SettingsDataPanel';
+import { Settings as SettingsIcon, Palette, Gamepad2, Tag, Volume2, VolumeX, Zap } from 'lucide-react';
 
 interface SettingsPanelProps {
-  games: Game[];
-  setGames: React.Dispatch<React.SetStateAction<Game[]>>;
-  settings: Settings;
-  setSettings: React.Dispatch<React.SetStateAction<Settings>>;
   isOpen: boolean;
   setIsOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  settings: Settings;
+  setSettings: React.Dispatch<React.SetStateAction<Settings>>;
   clearAll: () => void;
+  // Props for Integration Panel
+  dbStatus: 'loading' | 'connected' | 'disconnected';
+  dbError: string | null;
+  // Props for Data Panel
+  games: Game[];
+  setGames: React.Dispatch<React.SetStateAction<Game[]>>;
+  preloading: boolean;
+  preloadProgress: number;
+  handlePreloadPrices: () => Promise<void>;
+  editingGame: Game | null;
+  setEditingGame: React.Dispatch<React.SetStateAction<Game | null>>;
+  editForm: { name: string; appId: string; color: string; image: string; };
+  setEditForm: React.Dispatch<React.SetStateAction<{ name: string; appId: string; color: string; image: string; }>>;
+  saveEditedGame: () => void;
+  handleEditGame: (game: Game) => void;
 }
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ 
-  games, 
-  setGames, 
-  settings, 
-  setSettings, 
-  isOpen, 
-  setIsOpen, 
-  clearAll 
+const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  isOpen,
+  setIsOpen,
+  settings,
+  setSettings,
+  clearAll,
+  dbStatus,
+  dbError,
+  games,
+  setGames,
+  preloading,
+  preloadProgress,
+  handlePreloadPrices,
+  editingGame,
+  setEditingGame,
+  editForm,
+  setEditForm,
+  saveEditedGame,
+  handleEditGame,
 }) => {
   const [activeTab, setActiveTab] = useState<'appearance' | 'integration' | 'data'>('appearance');
-  const [preloading, setPreloading] = useState(false);
-  const [preloadProgress, setPreloadProgress] = useState(0);
-  const [editingGame, setEditingGame] = useState<Game | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', appId: '', color: '', image: '' });
-  const [linkCopied, setLinkCopied] = useState(false);
-  const [dbStatus, setDbStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
-  const [dbError, setDbError] = useState<string | null>(null);
-  
-  const API_URL = import.meta.env.VITE_API_URL || "https://tyxlbygyynhdxcexgaxf.functions.supabase.co/fortune-wheel";
-  
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    const checkDbStatus = async () => {
-      setDbError(null);
-      try {
-        const res = await fetch(`${API_URL}/api/health`);
-        const text = await res.text();
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = { raw: text };
-        }
-        console.log('Health check response:', { status: res.status, data });
-        if (res.ok) {
-          setDbStatus('connected');
-        } else {
-          throw new Error(JSON.stringify(data));
-        }
-      } catch (err: any) {
-        console.error('DB check failed:', err);
-        setDbStatus('disconnected');
-        setDbError(err?.message || String(err));
-      }
-    };
-    
-    checkDbStatus();
-  }, [isOpen, API_URL]);
-  
-  const handlePreloadPrices = async () => {
-    setPreloading(true);
-    setPreloadProgress(0);
-    const updatedGames = [...games];
-    
-    for (let i = 0; i < updatedGames.length; i++) {
-      const game = updatedGames[i];
-      if (game.appId) {
-        try {
-          const data = await fetchSteamPrice(game.appId, settings);
-          if (data) {
-            updatedGames[i] = { 
-              ...game, 
-              price: data.price, 
-              discount: data.discount, 
-              originalPrice: data.originalPrice 
-            };
-          }
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (e) {
-          console.error('Error preloading price for', game.name, e);
-        }
-      }
-      setPreloadProgress(Math.round(((i + 1) / updatedGames.length) * 100));
-    }
-    setGames(updatedGames);
-    setSettings({ ...settings, prices: { ...settings.prices, preloaded: true } });
-    setPreloading(false);
-  };
 
-  const handleEditGame = (game: Game) => {
-    setEditingGame(game);
-    setEditForm({
-      name: game.name,
-      appId: game.appId || '',
-      color: game.color,
-      image: game.image || ''
-    });
-  };
 
-  const saveEditedGame = () => {
-    if (!editingGame || !editForm.name) return;
-    setGames(games.map(g => 
-      g.id === editingGame.id 
-        ? { ...g, name: editForm.name, appId: editForm.appId, color: editForm.color, image: editForm.image } 
-        : g
-    ));
-    setEditingGame(null);
-  };
 
-  const handleCopyLink = async () => {
-    console.log('Share button clicked!');
-    console.log('Current settings object:', JSON.parse(JSON.stringify(settings)));
-    console.log('Current games (with images):', games.map(g => ({ id: g.id, name: g.name, hasImage: !!g.image })));
-    
-    let stateToShare = {
-      settings: settings,
-      games: games
-    };
-    console.log('State to share (full):', stateToShare);
-    
-    // First try API for short links
-    try {
-      const response = await fetch(`${API_URL}/api/shares`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: stateToShare })
-      });
-      
-      if (response.ok) {
-        const { id: shareId } = await response.json();
-        const shareUrl = `${window.location.origin}${window.location.pathname}?share=${shareId}`;
-        console.log('Generated short share URL:', shareUrl);
-        
-        // Copy the link with fallback
-        try {
-          await navigator.clipboard.writeText(shareUrl);
-          setLinkCopied(true);
-          setTimeout(() => setLinkCopied(false), 3000);
-        } catch (clipboardErr) {
-          console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
-          
-          const textArea = document.createElement('textarea');
-          textArea.value = shareUrl;
-          textArea.style.position = 'fixed';
-          textArea.style.left = '-9999px';
-          textArea.style.top = '-9999px';
-          document.body.appendChild(textArea);
-          textArea.focus();
-          textArea.select();
-          
-          try {
-            document.execCommand('copy');
-            console.log('Copied via fallback');
-            setLinkCopied(true);
-            setTimeout(() => setLinkCopied(false), 3000);
-          } catch (fallbackErr) {
-            console.error('Fallback copy also failed:', fallbackErr);
-            prompt('Скопируйте ссылку:', shareUrl);
-          } finally {
-            document.body.removeChild(textArea);
-          }
-        }
-        return; // Success with API share
-      }
-    } catch (apiErr) {
-      console.error('Failed to create share via API, trying localStorage:', apiErr);
-    }
-    
-    // Fallback to localStorage if API fails
-    try {
-      const shareId = Math.random().toString(36).substring(2, 8);
-      let shareDB = JSON.parse(localStorage.getItem('shareDB') || '{}');
-      
-      const keys = Object.keys(shareDB);
-      if (keys.length >= 5) {
-        const keysToRemove = keys.slice(0, keys.length - 4);
-        keysToRemove.forEach(key => {
-          delete shareDB[key];
-        });
-      }
-      
-      shareDB[shareId] = stateToShare;
-      localStorage.setItem('shareDB', JSON.stringify(shareDB));
-      
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${shareId}`;
-      alert('Не удалось подключиться к серверу, ссылка создана локально (только для этого браузера)');
-      
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        setLinkCopied(true);
-        setTimeout(() => setLinkCopied(false), 3000);
-      } catch (clipboardErr) {
-        console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
-        
-        const textArea = document.createElement('textarea');
-        textArea.value = shareUrl;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        textArea.style.top = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        
-        try {
-          document.execCommand('copy');
-          console.log('Copied via fallback');
-          setLinkCopied(true);
-          setTimeout(() => setLinkCopied(false), 3000);
-        } catch (fallbackErr) {
-          console.error('Fallback copy also failed:', fallbackErr);
-          prompt('Скопируйте ссылку:', shareUrl);
-        } finally {
-          document.body.removeChild(textArea);
-        }
-      }
-      return;
-    } catch (localErr) {
-      console.error('Failed to create share via localStorage, trying URL-based:', localErr);
-    }
-    
-    // Last resort: URL-based share (long link)
-    try {
-      const stateJson = JSON.stringify(stateToShare);
-      const encodedState = btoa(encodeURIComponent(stateJson));
-      const shareUrl = `${window.location.origin}${window.location.pathname}?state=${encodedState}`;
-      console.log('Generated URL share URL:', shareUrl);
-      
-      // Copy the link
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        setLinkCopied(true);
-        setTimeout(() => setLinkCopied(false), 3000);
-      } catch (clipboardErr) {
-        console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
-        
-        const textArea = document.createElement('textarea');
-        textArea.value = shareUrl;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        textArea.style.top = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        
-        try {
-          document.execCommand('copy');
-          console.log('Copied via fallback');
-          setLinkCopied(true);
-          setTimeout(() => setLinkCopied(false), 3000);
-        } catch (fallbackErr) {
-          console.error('Fallback copy also failed:', fallbackErr);
-          prompt('Скопируйте ссылку:', shareUrl);
-        } finally {
-          document.body.removeChild(textArea);
-        }
-      }
-    } catch (urlErr) {
-      console.error('Failed to create any share link:', urlErr);
-      alert('Не удалось создать ссылку для шаринга');
-    }
-  };
+
+
+
+
+  
+
+  
+
+  
+
+
+
+
 
   return (
     <div className={`fixed inset-0 bg-black/60 z-50 transition-opacity ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={() => setIsOpen(false)}>
@@ -274,10 +74,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <SettingsIcon size={28} /> Настройки
           </h2>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={handleCopyLink} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm">
-              {linkCopied ? <Check size={18} /> : <Link2 size={18} />}
-              {linkCopied ? 'Ссылка' : 'Короткая ссылка'}
-            </button>
+
             <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700">
               ✕
             </button>
@@ -636,7 +433,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       {dbStatus === 'connected' && (
                         <span className="text-green-400 text-sm flex items-center gap-1">
                           <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                          Подключено
+                          Всё подключено!
                         </span>
                       )}
                       {dbStatus === 'disconnected' && (
@@ -650,17 +447,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   {dbError && (
                     <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm break-all">
                       {dbError}
-                    </div>
-                  )}
-                  <div className="text-slate-400 text-xs">
-                    API URL: {API_URL}
-                  </div>
-                  <div className="text-slate-400 text-xs">
-                    VITE_API_URL: {import.meta.env.VITE_API_URL ? "✅ Установлен" : "❌ Не установлен"}
-                  </div>
-                  {import.meta.env.VITE_API_URL && (
-                    <div className="text-slate-500 text-xs">
-                      VITE_API_URL значение: {import.meta.env.VITE_API_URL}
                     </div>
                   )}
                 </div>
