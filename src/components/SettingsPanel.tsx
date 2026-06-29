@@ -655,6 +655,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <div className="text-slate-400 text-xs">
                     API URL: {API_URL}
                   </div>
+                  <div className="text-slate-400 text-xs">
+                    VITE_API_URL: {import.meta.env.VITE_API_URL ? "✅ Установлен" : "❌ Не установлен"}
+                  </div>
+                  {import.meta.env.VITE_API_URL && (
+                    <div className="text-slate-500 text-xs">
+                      VITE_API_URL значение: {import.meta.env.VITE_API_URL}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="space-y-4">
