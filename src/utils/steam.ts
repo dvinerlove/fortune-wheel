@@ -6,7 +6,7 @@ interface SteamPriceData {
   originalPrice?: string;
 }
 
-interface SteamSearchResult {
+export interface SteamSearchResult {
   appId: string;
   name: string;
   icon: string;

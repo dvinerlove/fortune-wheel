@@ -3,10 +3,10 @@ import type { Game, Settings } from '../types';
 import { Tag, RefreshCcw, Edit2 } from 'lucide-react';
 
 interface SettingsDataPanelProps {
-  games: Game[];
-  setGames: React.Dispatch<React.SetStateAction<Game[]>>;
   settings: Settings;
   setSettings: React.Dispatch<React.SetStateAction<Settings>>;
+  games: Game[];
+  setGames: React.Dispatch<React.SetStateAction<Game[]>>;
   preloading: boolean;
   preloadProgress: number;
   handlePreloadPrices: () => Promise<void>;
@@ -19,10 +19,10 @@ interface SettingsDataPanelProps {
 }
 
 const SettingsDataPanel: React.FC<SettingsDataPanelProps> = ({
-  games,
-  setGames,
   settings,
   setSettings,
+  games,
+  setGames,
   preloading,
   preloadProgress,
   handlePreloadPrices,

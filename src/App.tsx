@@ -2,8 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { Game, Settings, HistoryItem } from './types';
 import { INITIAL_GAMES, STEAM_APP_IDS, getGameColor } from './constants';
 import { DEFAULT_SETTINGS } from './types';
-import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping } from './utils/steam';
-import type { SteamSearchResult } from './utils/steam';
+import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping, SteamSearchResult } from './utils/steam';
 import FortuneWheel from './components/FortuneWheel';
 import SettingsPanel from './components/SettingsPanel';
 import HistoryPanel from './components/HistoryPanel';
@@ -575,7 +574,7 @@ function App() {
     if (gameWithAppId.appId && !gameWithAppId.price && settings.steam.enableIntegration) {
       setLoadingPrices(true);
       try {
-        const data = await fetchSteamPrice(gameWithAppId.appId, settings);
+        const data = await fetchSteamPrice(gameWithAppId.appId as string, settings);
         if (data) {
           const updatedGame = { 
             ...gameWithAppId, 
