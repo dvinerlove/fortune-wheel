@@ -30,7 +30,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [linkCopied, setLinkCopied] = useState(false);
   const [dbStatus, setDbStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  const API_URL = import.meta.env.VITE_API_URL || "https://tyxlbygyynhdxcexgaxf.functions.supabase.co/fortune-wheel";
   
   useEffect(() => {
     if (!isOpen) return;

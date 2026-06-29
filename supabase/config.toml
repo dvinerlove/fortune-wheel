@@ -1,0 +1,52 @@
+
+# A link to your project dashboard. Useful for your team.
+project_id = "tyxlbygyynhdxcexgaxf"
+
+# The port to use when running Supabase functions locally
+# functions_port = 54322
+
+# The port to use for the Supabase Studio dashboard
+# studio_port = 54323
+
+# The port to use for the Inbucket email testing service
+# inbucket_port = 54324
+
+# The port to use for the pgAdmin PostgreSQL database management tool
+# db_pgadmin_port = 54325
+
+# The port to use for the pgbouncer connection pooler
+# db_pooler_port = 54320
+
+# The port to use for the local Postgres database
+# db_port = 54322
+
+# The port to use for the Gotrue authentication service
+# auth_port = 54321
+
+# The port to use for the Kong API gateway
+# api_port = 54321
+
+# The port to use for the Realtime service
+# realtime_port = 54321
+
+# The port to use for the Storage service
+# storage_port = 54321
+
+# The port to use for the Logflare analytics service
+# analytics_port = 54321
+
+# The port to use for the Vector database service
+# db_vector_port = 54321
+
+# The port to use for the Edge Function testing service
+# edge_runtimes_port = 54321
+
+# The JWT secret to use for the local Supabase instance
+# jwt_secret = "your-super-secret-jwt-token-here"
+
+# The anonymous key to use for the local Supabase instance
+# anon_key = "your-anon-key-here"
+
+# The service role key to use for the local Supabase instance
+# service_role_key = "your-service-role-key-here"
+
