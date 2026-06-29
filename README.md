@@ -51,6 +51,8 @@
 - Framer Motion (анимации)
 - Tailwind CSS (стилизация)
 - Lucide React (иконки)
+- Supabase (Edge Functions + Database)
+- GitHub Pages (деплой)
 
 ## 📌 Примечание
 
