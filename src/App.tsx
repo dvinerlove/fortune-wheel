@@ -42,6 +42,25 @@ const useAudio = () => {
     oscillator.stop(ctx.currentTime + 0.5);
   };
 
+  const playTickSound = (volume: number = 0.5) => {
+    const ctx = getAudioContext();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(800, ctx.currentTime);
+    oscillator.frequency.setValueAtTime(400, ctx.currentTime + 0.05);
+    
+    gainNode.gain.setValueAtTime(volume * 0.15, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+    
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + 0.1);
+  };
+
   const playWinSound = (volume: number = 0.5) => {
     const ctx = getAudioContext();
     const frequencies = [440, 554, 659, 880]; // A4, C#5, E5, A5
@@ -64,7 +83,7 @@ const useAudio = () => {
     });
   };
 
-  return { playSpinSound, playWinSound };
+  return { playSpinSound, playTickSound, playWinSound };
 };
 
 function App() {
@@ -86,7 +105,6 @@ function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [initialized, setInitialized] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [dbStatus, setDbStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [dbError, setDbError] = useState<string | null>(null);
@@ -217,7 +235,7 @@ function App() {
     setSteamSearchResults([]);
   };
 
-  const { playSpinSound, playWinSound } = useAudio();
+  const { playSpinSound, playTickSound, playWinSound } = useAudio();
 
   const API_URL = import.meta.env.VITE_API_URL;
 
@@ -449,7 +467,6 @@ function App() {
       setGames(loadedGames);
       setHistory(loadedHistory);
       setInitialized(true);
-      setIsConnected(true);
       setDbStatus('connected');
       setDbError(null);
       
@@ -623,7 +640,7 @@ function App() {
 
   return (
     <div 
-      className="min-h-screen text-slate-100 font-sans p-4 md:p-8 transition-all duration-300"
+      className="h-screen text-slate-100 font-sans p-4 md:p-8 transition-all duration-300 overflow-auto"
       style={{
         backgroundImage: settings.customization.backgroundImage 
           ? `url(${settings.customization.backgroundImage})` 
@@ -680,9 +697,7 @@ function App() {
             </button>
           </div>
 
-          {isConnected && (
-            <p className="text-center text-green-400 text-sm mt-4">Все подключено!</p>
-          )}
+
 
           <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
             {games.map((game) => (
@@ -727,6 +742,11 @@ function App() {
               settings={settings}
               onSpinStart={handleSpinStart}
               isWinPopupOpen={selectedGame !== null}
+              onTick={() => {
+                if (settings.sound.enabled) {
+                  playTickSound(settings.sound.volume);
+                }
+              }}
             />
           </div>
 

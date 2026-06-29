@@ -46,9 +46,11 @@ export async function fetchSteamPrice(
             'RUB': '₽'
           }[settings.steam.currency] || '';
           
-          result.price = `${data.price} ${currencySymbol}`.trim();
+          if (data.price != null) {
+            result.price = `${data.price} ${currencySymbol}`.trim();
+          }
           
-          if (data.discount > 0) {
+          if (data.discount > 0 && data.originalPrice != null) {
             result.discount = `-${data.discount}%`;
             result.originalPrice = `${data.originalPrice} ${currencySymbol}`.trim();
           }

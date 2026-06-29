@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, useAnimation } from 'framer-motion';
+import { motion, useAnimation, useMotionValue } from 'framer-motion';
 import type { Game, Settings } from '../types';
 
 interface FortuneWheelProps {
@@ -10,6 +10,7 @@ interface FortuneWheelProps {
   settings: Settings;
   onSpinStart?: () => void;
   isWinPopupOpen?: boolean;
+  onTick?: () => void;
 }
 
 const FortuneWheel: React.FC<FortuneWheelProps> = ({ 
@@ -19,22 +20,44 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
   setIsSpinning,
   settings,
   onSpinStart,
-  isWinPopupOpen
+  isWinPopupOpen,
+  onTick
 }) => {
   const controls = useAnimation();
+  const rotation = useMotionValue(0);
   const [totalRotation, setTotalRotation] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const currentRotationRef = useRef(0);
+  const lastSectorIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     currentRotationRef.current = totalRotation;
-    controls.set({ rotate: totalRotation });
-  }, [totalRotation, controls]);
+    rotation.set(totalRotation);
+  }, [totalRotation, rotation]);
+
+  // Function to track rotation and play ticks
+  const checkTick = (currentRotation: number, sectorAngle: number) => {
+    if (!onTick || games.length === 0) return;
+    
+    const normalizedRotation = (-currentRotation) % 360;
+    const adjustedRotation = (normalizedRotation + 90) % 360;
+    let currentSectorIndex = Math.floor(adjustedRotation / sectorAngle);
+    if (currentSectorIndex < 0) currentSectorIndex += games.length;
+    if (currentSectorIndex >= games.length) currentSectorIndex = 0;
+    
+    if (lastSectorIndexRef.current !== null && lastSectorIndexRef.current !== currentSectorIndex) {
+      onTick();
+    }
+    lastSectorIndexRef.current = currentSectorIndex;
+  };
 
   useEffect(() => {
     if (!isSpinning && !isWinPopupOpen && settings.wheel.idleSpin && games.length > 0) {
       lastTimeRef.current = performance.now();
+      lastSectorIndexRef.current = null;
+      
+      const sectorAngle = 360 / games.length;
       
       const animateIdle = (time: number) => {
         const deltaTime = time - lastTimeRef.current;
@@ -43,7 +66,9 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
         const degreesToAdd = (deltaTime / 1000) * 6;
         
         currentRotationRef.current -= degreesToAdd;
-        controls.set({ rotate: currentRotationRef.current });
+        rotation.set(currentRotationRef.current);
+        
+        checkTick(currentRotationRef.current, sectorAngle);
         
         animationFrameRef.current = requestAnimationFrame(animateIdle);
       };
@@ -59,13 +84,14 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isSpinning, settings.wheel.idleSpin, games.length, controls, isWinPopupOpen]);
+  }, [isSpinning, settings.wheel.idleSpin, games.length, rotation, isWinPopupOpen, onTick]);
 
   const spin = async () => {
     if (isSpinning || games.length === 0) return;
 
     if (onSpinStart) onSpinStart();
     setIsSpinning(true);
+    lastSectorIndexRef.current = null;
     
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -74,7 +100,27 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
     
     const spinDegrees = 1800 + Math.random() * 360;
     const newRotation = currentRotationRef.current - spinDegrees;
+    const sectorAngle = 360 / games.length;
     
+    // Use a requestAnimationFrame loop to check for ticks during animation
+    let animationStartTime: number;
+    
+    const animateTickCheck = (time: number) => {
+      if (!animationStartTime) animationStartTime = time;
+      
+      // Get the current rotation value from the MotionValue
+      const currentRotation = rotation.get();
+      checkTick(currentRotation, sectorAngle);
+      
+      // Continue checking until the spin is done (with a small buffer)
+      if (isSpinning) {
+        requestAnimationFrame(animateTickCheck);
+      }
+    };
+    
+    requestAnimationFrame(animateTickCheck);
+    
+    // Start the animation
     await controls.start({
       rotate: newRotation,
       transition: { duration: settings.wheel.spinDuration, ease: [0.22, 1, 0.36, 1] }
@@ -86,7 +132,6 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
     // Pointer is on RIGHT (0 degrees), adjust calculation accordingly!
     const normalizedRotation = (-newRotation) % 360;
     const adjustedRotation = (normalizedRotation + 90) % 360; // because we have -90 offset in sector angles
-    const sectorAngle = 360 / games.length;
     let winningIndex = Math.floor(adjustedRotation / sectorAngle);
     if (winningIndex < 0) winningIndex += games.length;
     if (winningIndex >= games.length) winningIndex = 0;
@@ -132,10 +177,11 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
       <motion.div
         animate={controls}
         initial={{ rotate: 0 }}
-        className="w-full h-full rounded-full border-8 md:border-12 shadow-2xl overflow-hidden relative"
         style={{ 
-          borderColor: settings.customization.wheelBorderColor
+          borderColor: settings.customization.wheelBorderColor,
+          rotate: rotation
         }}
+        className="w-full h-full rounded-full border-8 md:border-12 shadow-2xl overflow-hidden relative"
       >
         <div 
           className="absolute inset-0"

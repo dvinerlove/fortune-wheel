@@ -172,7 +172,7 @@ Deno.serve(async (req) => {
         .gte("last_updated", fourDaysAgo)
         .single();
 
-      if (!selectError && existingPrice) {
+      if (!selectError && existingPrice && existingPrice.price != null) {
         return new Response(
           JSON.stringify({
             price: existingPrice.price,

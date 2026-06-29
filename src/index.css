@@ -15,16 +15,24 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-body {
+html, body {
   margin: 0;
+  padding: 0;
+  overflow: hidden; /* Prevent scroll on body/html */
+  width: 100%;
+  height: 100%;
+}
+
+body {
   display: flex;
   place-items: center;
   min-width: 320px;
-  min-height: 100vh;
 }
 
 #root {
   width: 100%;
+  height: 100%;
+  overflow: auto; /* Only root scrolls */
 }
 
 .custom-scrollbar::-webkit-scrollbar {
