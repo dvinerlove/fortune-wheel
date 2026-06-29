@@ -179,6 +179,18 @@ app.post('/api/prices/preload', async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    const { error } = await supabase.from('shares').select('id').limit(1);
+    if (error) throw error;
+    res.json({ status: 'ok', database: 'connected', supabaseUrl: process.env.SUPABASE_URL });
+  } catch (err) {
+    console.error('Health check failed:', err);
+    res.status(500).json({ status: 'error', database: 'disconnected', error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
 });

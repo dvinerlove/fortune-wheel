@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Game, Settings } from '../types';
 import { fetchSteamPrice } from '../utils/steam';
-import { Settings as SettingsIcon, Palette, Gamepad2, Tag, RefreshCcw, Edit2, Link2, Check, Zap, Volume2, VolumeX } from 'lucide-react';
+import { Settings as SettingsIcon, Palette, Gamepad2, Tag, RefreshCcw, Edit2, Link2, Check, Zap, Volume2, VolumeX, Database } from 'lucide-react';
 
 interface SettingsPanelProps {
   games: Game[];
@@ -28,7 +28,27 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [editForm, setEditForm] = useState({ name: '', appId: '', color: '', image: '' });
   const [linkCopied, setLinkCopied] = useState(false);
-
+  const [dbStatus, setDbStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const checkDbStatus = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/health`);
+        if (res.ok) setDbStatus('connected');
+        else throw new Error('Not connected');
+      } catch (err) {
+        console.error('DB check failed:', err);
+        setDbStatus('disconnected');
+      }
+    };
+    
+    checkDbStatus();
+  }, [isOpen, API_URL]);
+  
   const handlePreloadPrices = async () => {
     setPreloading(true);
     setPreloadProgress(0);
@@ -78,8 +98,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     ));
     setEditingGame(null);
   };
-
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
   const handleCopyLink = async () => {
     console.log('Share button clicked!');
@@ -587,6 +605,39 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           {activeTab === 'integration' && (
             <div className="space-y-8">
+              <div className="space-y-4">
+                <h3 className="text-xl font-semibold text-slate-200 flex items-center gap-2">
+                  <Database size={20} /> База данных
+                </h3>
+                <div className="bg-slate-700/30 rounded-xl p-4 space-y-4">
+                  <div className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <Database size={20} className="text-slate-300" />
+                      <span className="text-slate-300">Статус подключения</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {dbStatus === 'loading' && (
+                        <span className="text-yellow-400 text-sm">Загрузка...</span>
+                      )}
+                      {dbStatus === 'connected' && (
+                        <span className="text-green-400 text-sm flex items-center gap-1">
+                          <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+                          Подключено
+                        </span>
+                      )}
+                      {dbStatus === 'disconnected' && (
+                        <span className="text-red-400 text-sm flex items-center gap-1">
+                          <span className="w-2 h-2 bg-red-400 rounded-full"></span>
+                          Отключено
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-slate-400 text-xs">
+                    API URL: {API_URL}
+                  </div>
+                </div>
+              </div>
               <div className="space-y-4">
                 <h3 className="text-xl font-semibold text-slate-200 flex items-center gap-2">
                   <Gamepad2 size={20} /> Steam
