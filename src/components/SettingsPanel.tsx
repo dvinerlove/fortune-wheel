@@ -79,7 +79,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setEditingGame(null);
   };
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
   const handleCopyLink = async () => {
     console.log('Share button clicked!');
@@ -92,48 +92,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     };
     console.log('State to share (full):', stateToShare);
     
-    // First try URL-based share (works on GitHub Pages without backend)
-    try {
-      const stateJson = JSON.stringify(stateToShare);
-      const encodedState = btoa(encodeURIComponent(stateJson));
-      const shareUrl = `${window.location.origin}${window.location.pathname}?state=${encodedState}`;
-      console.log('Generated URL share URL:', shareUrl);
-      
-      // Copy the link
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        setLinkCopied(true);
-        setTimeout(() => setLinkCopied(false), 3000);
-      } catch (clipboardErr) {
-        console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
-        
-        const textArea = document.createElement('textarea');
-        textArea.value = shareUrl;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        textArea.style.top = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        
-        try {
-          document.execCommand('copy');
-          console.log('Copied via fallback');
-          setLinkCopied(true);
-          setTimeout(() => setLinkCopied(false), 3000);
-        } catch (fallbackErr) {
-          console.error('Fallback copy also failed:', fallbackErr);
-          prompt('Скопируйте ссылку:', shareUrl);
-        } finally {
-          document.body.removeChild(textArea);
-        }
-      }
-      return; // Success with URL-based share
-    } catch (urlErr) {
-      console.error('Failed to create URL-based share, trying API:', urlErr);
-    }
-    
-    // Fallback to API if URL-based fails
+    // First try API for short links
     try {
       const response = await fetch(`${API_URL}/api/shares`, {
         method: 'POST',
@@ -141,47 +100,48 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         body: JSON.stringify({ data: stateToShare })
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to create share');
-      }
-      
-      const { id: shareId } = await response.json();
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${shareId}`;
-      console.log('Generated short share URL:', shareUrl);
-      
-      // Copy the link with fallback
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        setLinkCopied(true);
-        setTimeout(() => setLinkCopied(false), 3000);
-      } catch (clipboardErr) {
-        console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
+      if (response.ok) {
+        const { id: shareId } = await response.json();
+        const shareUrl = `${window.location.origin}${window.location.pathname}?share=${shareId}`;
+        console.log('Generated short share URL:', shareUrl);
         
-        const textArea = document.createElement('textarea');
-        textArea.value = shareUrl;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        textArea.style.top = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        
+        // Copy the link with fallback
         try {
-          document.execCommand('copy');
-          console.log('Copied via fallback');
+          await navigator.clipboard.writeText(shareUrl);
           setLinkCopied(true);
           setTimeout(() => setLinkCopied(false), 3000);
-        } catch (fallbackErr) {
-          console.error('Fallback copy also failed:', fallbackErr);
-          prompt('Скопируйте ссылку:', shareUrl);
-        } finally {
-          document.body.removeChild(textArea);
+        } catch (clipboardErr) {
+          console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
+          
+          const textArea = document.createElement('textarea');
+          textArea.value = shareUrl;
+          textArea.style.position = 'fixed';
+          textArea.style.left = '-9999px';
+          textArea.style.top = '-9999px';
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          
+          try {
+            document.execCommand('copy');
+            console.log('Copied via fallback');
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 3000);
+          } catch (fallbackErr) {
+            console.error('Fallback copy also failed:', fallbackErr);
+            prompt('Скопируйте ссылку:', shareUrl);
+          } finally {
+            document.body.removeChild(textArea);
+          }
         }
+        return; // Success with API share
       }
-    } catch (err) {
-      console.error('Failed to create share via API, falling back to localStorage:', err);
-      
-      // Fallback to localStorage if API fails
+    } catch (apiErr) {
+      console.error('Failed to create share via API, trying localStorage:', apiErr);
+    }
+    
+    // Fallback to localStorage if API fails
+    try {
       const shareId = Math.random().toString(36).substring(2, 8);
       let shareDB = JSON.parse(localStorage.getItem('shareDB') || '{}');
       
@@ -227,6 +187,50 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           document.body.removeChild(textArea);
         }
       }
+      return;
+    } catch (localErr) {
+      console.error('Failed to create share via localStorage, trying URL-based:', localErr);
+    }
+    
+    // Last resort: URL-based share (long link)
+    try {
+      const stateJson = JSON.stringify(stateToShare);
+      const encodedState = btoa(encodeURIComponent(stateJson));
+      const shareUrl = `${window.location.origin}${window.location.pathname}?state=${encodedState}`;
+      console.log('Generated URL share URL:', shareUrl);
+      
+      // Copy the link
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 3000);
+      } catch (clipboardErr) {
+        console.warn('Modern clipboard failed, trying fallback:', clipboardErr);
+        
+        const textArea = document.createElement('textarea');
+        textArea.value = shareUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        textArea.style.top = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+          document.execCommand('copy');
+          console.log('Copied via fallback');
+          setLinkCopied(true);
+          setTimeout(() => setLinkCopied(false), 3000);
+        } catch (fallbackErr) {
+          console.error('Fallback copy also failed:', fallbackErr);
+          prompt('Скопируйте ссылку:', shareUrl);
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
+    } catch (urlErr) {
+      console.error('Failed to create any share link:', urlErr);
+      alert('Не удалось создать ссылку для шаринга');
     }
   };
 
