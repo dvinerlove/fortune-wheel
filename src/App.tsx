@@ -469,13 +469,34 @@ function App() {
     localStorage.setItem('fortuneWheelGames', JSON.stringify(games));
     localStorage.setItem('fortuneWheelHistory', JSON.stringify(history));
 
-    if (API_URL) {
-      setDbStatus('connected');
-      setDbError(null);
-    } else {
-      setDbStatus('disconnected');
-      setDbError('API URL не настроен. Проверьте переменную окружения VITE_API_URL.');
-    }
+    const checkConnection = async () => {
+      if (!API_URL) {
+        setDbStatus('disconnected');
+        setDbError('API URL не настроен. Проверьте переменную окружения VITE_API_URL.');
+        return;
+      }
+      try {
+        const response = await fetch(`${API_URL}/api/health`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.database === 'connected') {
+            setDbStatus('connected');
+            setDbError(null);
+          } else {
+            setDbStatus('disconnected');
+            setDbError('Ошибка подключения к базе данных.');
+          }
+        } else {
+          setDbStatus('disconnected');
+          setDbError('Ошибка подключения к API.');
+        }
+      } catch (error) {
+        setDbStatus('disconnected');
+        setDbError('Не удалось подключиться к API.');
+      }
+    };
+
+    checkConnection();
   }, [settings, games, history, initialized, API_URL]);
 
   const handleAddGame = async () => {

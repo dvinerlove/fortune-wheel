@@ -135,12 +135,13 @@ Deno.serve(async (req) => {
 
     // Create share
     if (req.method === "POST" && (pathname === "/shares" || pathname === "/api/shares")) {
-      const { data } = await req.json();
+      const body = await req.json();
+      const shareData = body.state || body.data;
       const id = Math.random().toString(36).substring(2, 8);
-      const { error } = await supabase.from("shares").insert({ id, data });
+      const { error } = await supabase.from("shares").insert({ id, data: shareData });
       if (error) throw error;
       return new Response(
-        JSON.stringify({ id }),
+        JSON.stringify({ shareId: id }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
