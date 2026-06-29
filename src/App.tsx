@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import type { Game, Settings, HistoryItem } from './types';
 import { INITIAL_GAMES, STEAM_APP_IDS, getGameColor } from './constants';
 import { DEFAULT_SETTINGS } from './types';
-import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping, SteamSearchResult } from './utils/steam';
+import { fetchSteamPrice, searchSteamGames, getGameMapping, saveGameMapping } from './utils/steam';
+import type { SteamSearchResult } from './utils/steam';
 import FortuneWheel from './components/FortuneWheel';
 import SettingsPanel from './components/SettingsPanel';
 import HistoryPanel from './components/HistoryPanel';
@@ -106,7 +107,6 @@ function App() {
 
   const handleCopyLink = async () => {
     const url = new URL(window.location.href);
-    const params = new URLSearchParams(url.search);
 
     const state = {
       settings,
@@ -560,7 +560,7 @@ function App() {
         const searchResults = await searchSteamGames(game.name);
         if (searchResults.length === 1) {
           gameWithAppId = { ...game, appId: searchResults[0].appId };
-          await saveGameMapping(game.name, gameWithAppId.appId);
+          await saveGameMapping(game.name, searchResults[0].appId);
         } else if (searchResults.length > 1) {
           setGameToMapOnWinScreen(game);
           setSteamSearchResults(searchResults);

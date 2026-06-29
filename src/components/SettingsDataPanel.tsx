@@ -22,7 +22,7 @@ const SettingsDataPanel: React.FC<SettingsDataPanelProps> = ({
   settings,
   setSettings,
   games,
-  setGames,
+  setGames: _setGames,
   preloading,
   preloadProgress,
   handlePreloadPrices,

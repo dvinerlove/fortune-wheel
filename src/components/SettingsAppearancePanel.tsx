@@ -327,3 +327,5 @@ const SettingsAppearancePanel: React.FC<SettingsAppearancePanelProps> = ({
     </div>
   );
 };
+
+export default SettingsAppearancePanel;
