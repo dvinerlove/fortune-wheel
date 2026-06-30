@@ -1,12 +1,12 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { createClient } from "@supabase/supabase-js";
 
 // Initialize Supabase client
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
@@ -44,10 +44,10 @@ async function searchSteamGames(query: string) {
     return data.slice(0, 10).map((item: any) => ({
       appId: item.appid,
       name: item.name,
-      // Use library icon as fallback
+      // Use Akamai CDN instead of Cloudflare to avoid ORB blocking
       icon: item.img_icon_url 
-        ? `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${item.appid}/${item.img_icon_url}.jpg` 
-        : `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/${item.appid}/library_600x900_2x.jpg`
+        ? `https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/${item.appid}/${item.img_icon_url}.jpg` 
+        : `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${item.appid}/header.jpg`
     }));
   } catch (error) {
     return [];
@@ -161,30 +161,38 @@ Deno.serve(async (req) => {
       const { gameName, appId } = await req.json();
       const decodedName = decodeURIComponent(gameName);
 
-      // Upsert mapping
+      // Upsert mapping - specify onConflict for unique key!
       const { error: upsertError } = await supabase
         .from("game_mappings")
-        .upsert({ game_name: decodedName, app_id: appId, updated_at: new Date().toISOString() });
+        .upsert({ game_name: decodedName, app_id: appId, updated_at: new Date().toISOString() }, { onConflict: "game_name" });
       if (upsertError) throw upsertError;
 
-      // Increment usage count
-      const { data: existingUsage } = await supabase
-        .from("game_mapping_usage")
-        .select("count")
-        .eq("game_name", decodedName)
-        .eq("app_id", appId)
-        .maybeSingle();
-
-      if (existingUsage) {
-        await supabase
+      // Increment usage count - correct supabase syntax!
+      try {
+        // First try to increment
+        const { data, error } = await supabase
           .from("game_mapping_usage")
-          .update({ count: existingUsage.count + 1, updated_at: new Date().toISOString() })
+          .select("*")
           .eq("game_name", decodedName)
-          .eq("app_id", appId);
-      } else {
-        await supabase
-          .from("game_mapping_usage")
-          .insert({ game_name: decodedName, app_id: appId, count: 1, updated_at: new Date().toISOString() });
+          .eq("app_id", appId)
+          .maybeSingle();
+
+        if (!error && data) {
+          // If exists, update
+          await supabase
+            .from("game_mapping_usage")
+            .update({ count: (data as any).count + 1, updated_at: new Date().toISOString() })
+            .eq("game_name", decodedName)
+            .eq("app_id", appId);
+        } else {
+          // Not exists, insert!
+          await supabase
+            .from("game_mapping_usage")
+            .insert({ game_name: decodedName, app_id: appId, count: 1, updated_at: new Date().toISOString() });
+        }
+      } catch (usageErr) {
+        console.error("Usage count error:", usageErr);
+        // Don't fail the whole request on usage error!
       }
 
       return new Response(
@@ -195,40 +203,64 @@ Deno.serve(async (req) => {
 
     // Create share
     if (req.method === "POST" && (pathname === "/shares" || pathname === "/api/shares")) {
-      const body = await req.json();
-      const shareData = body.state || body.data;
+      try {
+        const body = await req.json();
+        const shareData = body.state || body.data;
 
-      // Generate a hash of the share data
-      const shareDataString = JSON.stringify(shareData);
-      const encoder = new TextEncoder();
-      const data = encoder.encode(shareDataString);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        if (!shareData) {
+          return new Response(
+            JSON.stringify({ error: "Missing share data (state or data field required)" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
-      // Check if a share with this hash already exists
-      const { data: existingShare, error: findError } = await supabase
-        .from("shares")
-        .select("id")
-        .eq("hash", hashHex)
-        .maybeSingle();
+        // Generate a hash of the share data
+        const shareDataString = JSON.stringify(shareData);
+        const encoder = new TextEncoder();
+        const data = encoder.encode(shareDataString);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-      if (!findError && existingShare) {
+        // Check if a share with this hash already exists
+        const { data: existingShare, error: findError } = await supabase
+          .from("shares")
+          .select("id")
+          .eq("hash", hashHex)
+          .maybeSingle();
+
+        if (findError) {
+          console.error("Error finding existing share:", findError);
+          throw findError;
+        }
+
+        if (existingShare) {
+          return new Response(
+            JSON.stringify({ shareId: existingShare.id }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // If not, create a new one
+        const id = Math.random().toString(36).substring(2, 8);
+        const { error } = await supabase.from("shares").insert({ id, data: shareData, hash: hashHex });
+        
+        if (error) {
+          console.error("Error inserting share:", error);
+          throw error;
+        }
+
         return new Response(
-          JSON.stringify({ shareId: existingShare.id }),
+          JSON.stringify({ shareId: id }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      } catch (error: any) {
+        console.error("Create share error:", error);
+        return new Response(
+          JSON.stringify({ error: error.message || "Failed to create share" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
-
-      // If not, create a new one
-      const id = Math.random().toString(36).substring(2, 8);
-      const { error } = await supabase.from("shares").insert({ id, data: shareData, hash: hashHex });
-      if (error) throw error;
-
-      return new Response(
-        JSON.stringify({ shareId: id }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
     }
 
     // Get share
@@ -293,8 +325,8 @@ Deno.serve(async (req) => {
           currency: priceData.currency,
           region: region,
           last_updated: new Date().toISOString()
-        });
-      if (upsertError) { /* handle error */ }
+        }, { onConflict: "app_id, region" });
+      if (upsertError) console.error("Price upsert error:", upsertError);
 
       return new Response(
         JSON.stringify(priceData),
@@ -342,7 +374,7 @@ Deno.serve(async (req) => {
                 currency: priceData.currency,
                 region: region,
                 last_updated: new Date().toISOString()
-              });
+              }, { onConflict: "app_id, region" });
             if (upsertError) console.error("Upsert error:", upsertError);
           }
         }

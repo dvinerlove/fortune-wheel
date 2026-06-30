@@ -87,6 +87,7 @@ function App() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [initialized, setInitialized] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [dbStatus, setDbStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [dbError, setDbError] = useState<string | null>(null);
   const [preloading, setPreloading] = useState(false);
@@ -96,6 +97,18 @@ function App() {
   // State for mapping suggestions
   const [mappingSuggestions, setMappingSuggestions] = useState<{ [gameId: string]: MappingSuggestion[] }>({});
   const [showMappingSuggestionsFor, setShowMappingSuggestionsFor] = useState<string | null>(null);
+  
+  // Helper to normalize a game object to ensure all required fields are present
+  const normalizeGame = (game: any, index: number = 0): Game => ({
+    id: game.id || Math.random().toString(36).substr(2, 9),
+    name: game.name || '',
+    appId: game.appId || undefined,
+    price: game.price,
+    discount: game.discount,
+    originalPrice: game.originalPrice,
+    color: game.color || getGameColor(index),
+    image: game.image
+  });
 
   const clearAll = () => {
     setSettings(DEFAULT_SETTINGS);
@@ -108,16 +121,28 @@ function App() {
   };
 
   const handleCopyLink = async () => {
+    setLinkError(null);
+    setLinkCopied(false);
+    
     const url = new URL(window.location.href);
 
     const state = {
       settings,
-      games: games.map(game => ({ name: game.name, appId: game.appId })) // Only save necessary game data
+      games: games.map(game => ({ 
+        name: game.name, 
+        appId: game.appId,
+        color: game.color,
+        image: game.image
+      })) // Save all important game data for perfect sharing!
     };
     const encodedState = btoa(encodeURIComponent(JSON.stringify(state)));
 
-    // Try to save to DB
+    let shortLinkSuccess = false;
+    // Try to save to DB for short link
     try {
+      if (!API_URL) {
+        throw new Error('API URL не настроен');
+      }
       const response = await fetch(`${API_URL}/api/shares`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -126,20 +151,32 @@ function App() {
 
       if (response.ok) {
         const { shareId } = await response.json();
+        if (!shareId) {
+          throw new Error('API не вернул shareId');
+        }
         url.searchParams.set('share', shareId);
         url.searchParams.delete('state'); // Remove old state param if exists
+        shortLinkSuccess = true;
       } else {
-        throw new Error('Failed to save to API');
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `API вернул ошибку: ${response.status}`);
+        } catch (parseError) {
+          throw new Error(`API вернул ошибку: ${response.status}`);
+        }
       }
     } catch (error) {
-      // Fallback to old method
+      // Show error but still copy a link (fallback to state param)
+      setLinkError(error instanceof Error ? error.message : 'Не удалось создать короткую ссылку');
       url.searchParams.set('state', encodedState);
       url.searchParams.delete('share');
     }
 
     await navigator.clipboard.writeText(url.toString());
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
+    if (shortLinkSuccess) {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
   };
 
   const handlePreloadPrices = async () => {
@@ -194,8 +231,18 @@ function App() {
 
   // Helper function to fetch mapping suggestions for a game
   const fetchMappingSuggestionsForGame = async (game: Game) => {
-    if (game.appId) return; // Already mapped
     const { suggestions } = await getMappingSuggestions(game.name);
+    
+    // Auto-map only if NOT already mapped AND (exact match OR 1 suggestion)
+    if (!game.appId) {
+      const exactMatch = suggestions.find(s => s.name.toLowerCase() === game.name.toLowerCase());
+      
+      if (exactMatch || suggestions.length === 1) {
+        const autoMapSuggestion = exactMatch || suggestions[0];
+        await handleApplyMappingSuggestion(game.id, autoMapSuggestion.appId);
+      }
+    }
+    
     setMappingSuggestions(prev => ({ ...prev, [game.id]: suggestions }));
   };
 
@@ -205,11 +252,15 @@ function App() {
     const game = games.find(g => g.id === gameId);
     if (!game) return;
 
+    // Get the suggestion to find its icon
+    const suggestion = mappingSuggestions[gameId]?.find(s => s.appId === appId);
+    const gameImage = suggestion?.icon || getSteamGameIconUrl(appId);
+
     // Save mapping (globally!)
     const success = await saveGameMapping(game.name, appId);
     if (success) {
       // Update game locally
-      const updatedGames = games.map(g => g.id === gameId ? { ...g, appId: appId } : g);
+      let updatedGames = games.map(g => g.id === gameId ? { ...g, appId: appId, image: gameImage } : g);
       setGames(updatedGames);
 
       // Fetch price for this game
@@ -258,9 +309,21 @@ function App() {
     setEditForm({ name: game.name, appId: game.appId || '', color: game.color, image: game.image || '' });
   };
 
+  // Helper to get Steam game icon URL
+  const getSteamGameIconUrl = (appId: string) => {
+    // Use Akamai CDN instead of Cloudflare to avoid ORB blocking
+    return `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`;
+  };
+
   const handleSteamGameSelect = async (selectedAppId: string | undefined) => {
     let priceData: any = undefined;
+    let gameImage: string | undefined = undefined;
+    
+    // Find the selected result to get its icon
     if (selectedAppId) {
+      const selectedResult = steamSearchResults.find(r => r.appId === selectedAppId);
+      gameImage = selectedResult?.icon || getSteamGameIconUrl(selectedAppId);
+      
       await saveGameMapping(gameNameToMap, selectedAppId);
       if (settings.steam.enableIntegration) {
         priceData = await fetchSteamPrice(selectedAppId, settings);
@@ -271,6 +334,7 @@ function App() {
       name: gameNameToMap,
       appId: selectedAppId,
       color: getGameColor(games.length), // Use current length for color calculation
+      image: gameImage,
       ...priceData
     };
     setGames([...games, newGame]);
@@ -281,11 +345,14 @@ function App() {
   };
 
   const handleWinScreenGameSelect = async (selectedAppId: string | undefined, originalGame: Game) => {
+    let gameImage: string | undefined = undefined;
     if (selectedAppId) {
+      const selectedResult = steamSearchResults.find(r => r.appId === selectedAppId);
+      gameImage = selectedResult?.icon || getSteamGameIconUrl(selectedAppId);
       await saveGameMapping(originalGame.name, selectedAppId);
     }
 
-    const updatedGame = { ...originalGame, appId: selectedAppId };
+    const updatedGame = { ...originalGame, appId: selectedAppId, image: gameImage };
     setGames(prevGames => prevGames.map(g => g.id === originalGame.id ? updatedGame : g));
     setSelectedGame(updatedGame); // Update the selected game on win screen
 
@@ -320,13 +387,13 @@ function App() {
 
   const API_URL = import.meta.env.VITE_API_URL;
 
-  // Fetch mapping suggestions for unmapped games when games list changes
+  // Fetch mapping suggestions for all games when games list changes
   useEffect(() => {
     if (!initialized) return;
 
-    // Fetch suggestions for all unmapped games
+    // Fetch suggestions for ALL games (even mapped ones, so button appears!)
     for (const game of games) {
-      if (!game.appId && !mappingSuggestions[game.id]) {
+      if (!mappingSuggestions[game.id]) {
         fetchMappingSuggestionsForGame(game);
       }
     }
@@ -389,7 +456,7 @@ function App() {
               };
             }
             if (sharedState.games) {
-              loadedGames = sharedState.games;
+              loadedGames = sharedState.games.map(normalizeGame);
               loadedFromShare = true;
             }
           } else {
@@ -439,7 +506,7 @@ function App() {
                 };
               }
               if (sharedState.games) {
-                loadedGames = sharedState.games;
+                loadedGames = sharedState.games.map(normalizeGame);
                 loadedFromShare = true;
               }
             }
@@ -485,7 +552,7 @@ function App() {
             };
           }
           if (decoded.games) {
-            loadedGames = decoded.games;
+            loadedGames = decoded.games.map(normalizeGame);
             loadedFromShare = true;
           }
         } catch (err) {
@@ -536,7 +603,7 @@ function App() {
             };
           }
           if (savedGames) {
-            loadedGames = JSON.parse(savedGames);
+            loadedGames = JSON.parse(savedGames).map(normalizeGame);
           }
           if (savedHistory) {
             loadedHistory = JSON.parse(savedHistory);
@@ -558,18 +625,25 @@ function App() {
 
       // 4. Try to auto-map games using existing DB mappings (or most popular mappings)
       const mappedGames = await Promise.all(loadedGames.map(async game => {
-        if (game.appId) return game; // Already mapped, skip
+        if (game.appId) {
+          // If already mapped but no image, set the image
+          if (!game.image) {
+            return { ...game, image: getSteamGameIconUrl(game.appId) };
+          }
+          return game; // Already mapped and has image, skip
+        }
 
         // Try to get existing mapping first
         const { existing, suggestions } = await getMappingSuggestions(game.name);
         if (existing) {
-          return { ...game, appId: existing };
+          const suggestion = suggestions.find(s => s.appId === existing);
+          return { ...game, appId: existing, image: suggestion?.icon || getSteamGameIconUrl(existing) };
         }
 
         // If no existing mapping, try the most used one
         const mostUsed = suggestions.find(s => s.isMostUsed);
         if (mostUsed) {
-          return { ...game, appId: mostUsed.appId };
+          return { ...game, appId: mostUsed.appId, image: mostUsed.icon || getSteamGameIconUrl(mostUsed.appId) };
         }
 
         return game;
@@ -581,6 +655,16 @@ function App() {
       setInitialized(true);
       setDbStatus('connected');
       setDbError(null);
+      // Reset all UI state to avoid open modals!
+      setEditingGame(null);
+      setSettingsOpen(false);
+      setHistoryOpen(false);
+      setImportOpen(false);
+      setConfirmClearGamesOpen(false);
+      setShowSteamSearchResultsModal(false);
+      setShowWinScreenMappingModal(false);
+      setShowMappingSuggestionsFor(null);
+      setMappingSuggestions({});
 
       // Preload prices for loaded games
       if (loadedSettings.steam.enableIntegration) {
@@ -668,12 +752,14 @@ function App() {
     const gameName = newGameName.trim();
     let appId: string | undefined = undefined;
     let priceData: any = undefined;
+    let gameImage: string | undefined = undefined;
 
     if (settings.steam.enableIntegration) {
       // 1. Try to get mapping from DB
       const dbMapping = await getGameMapping(gameName);
       if (dbMapping) {
         appId = dbMapping.app_id;
+        gameImage = getSteamGameIconUrl(appId);
         // Fetch price immediately
         priceData = await fetchSteamPrice(appId, settings);
       } else {
@@ -682,6 +768,7 @@ function App() {
 
         if (searchResults.length === 1) {
           appId = searchResults[0].appId;
+          gameImage = searchResults[0].icon;
           // Save this new mapping to DB
           await saveGameMapping(gameName, appId);
           // Fetch price
@@ -702,6 +789,7 @@ function App() {
       name: gameName,
       appId: appId,
       color: getGameColor(games.length),
+      image: gameImage,
       ...priceData
     };
     setGames([...games, newGame]);
@@ -918,23 +1006,30 @@ function App() {
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setImportOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Импорт игр">
                 <File size={20} />
-                <span className="text-sm hidden sm:inline">Импорт</span>
+                <span className="text-sm sm:hidden">Импорт</span>
               </button>
               <button onClick={() => setConfirmClearGamesOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-red-400 p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Очистить список игр">
                 <Trash2 size={20} />
-                <span className="text-sm hidden sm:inline">Очистить</span>
+                <span className="text-sm sm:hidden">Очистить</span>
               </button>
-              <button onClick={handleCopyLink} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Короткая ссылка">
-                {linkCopied ? <Check size={20} /> : <Link2 size={20} />}
-                <span className="text-sm hidden sm:inline">{linkCopied ? 'Скопировано' : 'Ссылка'}</span>
-              </button>
+              <div className="flex-1 min-w-[44px]">
+                <button onClick={handleCopyLink} className="w-full text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Короткая ссылка">
+                  {linkCopied ? <Check size={20} /> : <Link2 size={20} />}
+                  <span className="text-sm sm:hidden">{linkCopied ? 'Скопировано' : 'Ссылка'}</span>
+                </button>
+                {linkError && (
+                  <div className="mt-1 text-xs text-red-400 break-all">
+                    {linkError}
+                  </div>
+                )}
+              </div>
               <button onClick={() => setHistoryOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="История">
                 <HistoryIcon size={20} />
-                <span className="text-sm hidden sm:inline">История</span>
+                <span className="text-sm sm:hidden">История</span>
               </button>
               <button onClick={() => setSettingsOpen(true)} className="flex-1 min-w-[44px] text-slate-400 hover:text-white p-3 rounded-lg hover:bg-slate-700 transition flex items-center justify-center gap-2" title="Настройки">
                 <SettingsIcon size={20} />
-                <span className="text-sm hidden sm:inline">Настройки</span>
+                <span className="text-sm sm:hidden">Настройки</span>
               </button>
             </div>
           </div>
@@ -1014,12 +1109,13 @@ function App() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
-                        {!game.appId && mappingSuggestions[game.id] && mappingSuggestions[game.id].length > 0 && (
+                        {mappingSuggestions[game.id] && mappingSuggestions[game.id].length > 1 && (
                           <button
-                            onClick={() => setShowMappingSuggestionsFor(game.id)}
+                            onClick={() => setShowMappingSuggestionsFor(showMappingSuggestionsFor === game.id ? null : game.id)}
                             className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold px-2 py-1 bg-indigo-900/30 rounded transition-all"
+                            title="Подобрать игру"
                           >
-                            Подобрать
+                            <Search size={16} />
                           </button>
                         )}
                         <button
@@ -1045,8 +1141,25 @@ function App() {
                             onClick={() => handleApplyMappingSuggestion(game.id, suggestion.appId)}
                             className="w-full flex items-center gap-2 p-3 rounded bg-slate-700 hover:bg-slate-600 transition-all text-left"
                           >
-                            {suggestion.icon && (
-                              <img src={suggestion.icon} alt="" className="w-10 h-10 rounded flex-shrink-0" />
+                            {suggestion.icon ? (
+                              <img 
+                                src={suggestion.icon} 
+                                alt="" 
+                                className="w-10 h-10 rounded flex-shrink-0" 
+                                onError={(e) => {
+                                  // If image fails to load, replace with placeholder
+                                  const img = e.target as HTMLImageElement;
+                                  const placeholder = document.createElement('div');
+                                  placeholder.className = 'w-10 h-10 rounded flex-shrink-0 flex items-center justify-center text-slate-300';
+                                  placeholder.style.backgroundColor = 'rgba(148, 163, 184, 0.2)';
+                                  placeholder.innerHTML = '🎮';
+                                  img.replaceWith(placeholder);
+                                }}
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded flex-shrink-0 flex items-center justify-center text-slate-300" style={{ backgroundColor: 'rgba(148, 163, 184, 0.2)' }}>
+                                🎮
+                              </div>
                             )}
                             <div className="flex-1">
                               <span className="text-sm font-medium text-white">{suggestion.name}</span>

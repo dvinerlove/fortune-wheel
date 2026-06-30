@@ -85,7 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   wheel: {
     spinDuration: 5,
     showGameNames: true,
-    showImages: false,
+    showImages: true,
     showColors: true,
     textPosition: 'far-outer',
     showSectorLines: true,

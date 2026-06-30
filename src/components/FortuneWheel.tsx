@@ -215,18 +215,29 @@ const FortuneWheel: React.FC<FortuneWheelProps> = ({
                     opacity={settings.customization.colorOpacity}
                   />
                 )}
-                {settings.wheel.showImages && game.image && (
+                {settings.wheel.showImages && (
                   <g transform={`translate(${textX}, ${textY}) rotate(${textRotation})`}>
-                    <image
-                      href={game.image}
-                      x="-6"
-                      y="-6"
-                      width="12"
-                      height="12"
-                      preserveAspectRatio="xMidYMid slice"
-                      className="select-none pointer-events-none"
-                      style={{ borderRadius: '50%' }}
-                    />
+                    {game.image ? (
+                      <image
+                        href={game.image}
+                        x="-6"
+                        y="-6"
+                        width="12"
+                        height="12"
+                        preserveAspectRatio="xMidYMid slice"
+                        className="select-none pointer-events-none"
+                        style={{ borderRadius: '50%' }}
+                      />
+                    ) : (
+                      <circle
+                        cx="0"
+                        cy="0"
+                        r="6"
+                        fill={game.color}
+                        opacity="0.8"
+                        className="select-none pointer-events-none"
+                      />
+                    )}
                   </g>
                 )}
                 {settings.wheel.showGameNames && (
