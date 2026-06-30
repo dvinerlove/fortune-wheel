@@ -97,6 +97,9 @@ function App() {
   // State for mapping suggestions
   const [mappingSuggestions, setMappingSuggestions] = useState<{ [gameId: string]: MappingSuggestion[] }>({});
   const [showMappingSuggestionsFor, setShowMappingSuggestionsFor] = useState<string | null>(null);
+  const [manualSearchQuery, setManualSearchQuery] = useState<string>('');
+  const [manualSearchLoading, setManualSearchLoading] = useState<boolean>(false);
+  const [tempGameId, setTempGameId] = useState<string | null>(null);
   
   // Helper to normalize a game object to ensure all required fields are present
   const normalizeGame = (game: any, index: number = 0): Game => ({
@@ -109,6 +112,31 @@ function App() {
     color: game.color || getGameColor(index),
     image: game.image
   });
+
+  // Helper to transliterate Russian to Latin characters
+  const transliterateRussian = (text: string): string => {
+    const cyrillicMap: Record<string, string> = {
+      'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
+      'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
+      'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts',
+      'ч': 'ch', 'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e',
+      'ю': 'yu', 'я': 'ya', 'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D',
+      'Е': 'E', 'Ё': 'Yo', 'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K',
+      'Л': 'L', 'М': 'M', 'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S',
+      'Т': 'T', 'У': 'U', 'Ф': 'F', 'Х': 'Kh', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh',
+      'Щ': 'Shch', 'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya'
+    };
+    
+    return text.split('').map(char => cyrillicMap[char] || char).join('');
+  };
+
+  // Helper to normalize strings for comparison (ignore case, punctuation, extra spaces)
+  const normalizeStringForComparison = (s: string): string => {
+    return s.toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, '') // remove punctuation and symbols
+      .replace(/\s+/g, ' ') // replace multiple spaces with single
+      .trim();
+  };
 
   const clearAll = () => {
     setSettings(DEFAULT_SETTINGS);
@@ -233,17 +261,51 @@ function App() {
   const fetchMappingSuggestionsForGame = async (game: Game) => {
     const { suggestions } = await getMappingSuggestions(game.name);
     
-    // Auto-map only if NOT already mapped AND (exact match OR 1 suggestion)
+    // Auto-map only if NOT already mapped, AND we have an EXACT normalized match
     if (!game.appId) {
-      const exactMatch = suggestions.find(s => s.name.toLowerCase() === game.name.toLowerCase());
+      const normalizedGameName = normalizeStringForComparison(game.name);
+      const transliteratedGameName = normalizeStringForComparison(transliterateRussian(game.name));
       
-      if (exactMatch || suggestions.length === 1) {
-        const autoMapSuggestion = exactMatch || suggestions[0];
+      let autoMapSuggestion: MappingSuggestion | undefined;
+      
+      // Only auto-map if we have an exact normalized or transliterated match!
+      autoMapSuggestion = suggestions.find(s => normalizeStringForComparison(s.name) === normalizedGameName);
+      
+      if (!autoMapSuggestion) {
+        autoMapSuggestion = suggestions.find(s => normalizeStringForComparison(transliterateRussian(s.name)) === transliteratedGameName);
+      }
+      
+      if (autoMapSuggestion) {
         await handleApplyMappingSuggestion(game.id, autoMapSuggestion.appId);
       }
     }
     
     setMappingSuggestions(prev => ({ ...prev, [game.id]: suggestions }));
+  };
+
+  // Helper to fetch price in background for a specific game ID
+  const fetchPriceInBackground = async (gameId: string, appId: string) => {
+    if (!settings.steam.enableIntegration) return;
+    try {
+      const priceData = await fetchSteamPrice(appId, settings);
+      if (priceData) {
+        // Update game with price, but only if it still exists
+        setGames(prevGames => {
+          const game = prevGames.find(g => g.id === gameId);
+          if (game && game.appId === appId) {
+            return prevGames.map(g => g.id === gameId ? {
+              ...g,
+              price: priceData.price,
+              discount: priceData.discount,
+              originalPrice: priceData.originalPrice
+            } : g);
+          }
+          return prevGames; // Game removed or appId changed, do nothing
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching price in background:', error);
+    }
   };
 
   // Handle applying a mapping suggestion to game
@@ -256,42 +318,23 @@ function App() {
     const suggestion = mappingSuggestions[gameId]?.find(s => s.appId === appId);
     const gameImage = suggestion?.icon || getSteamGameIconUrl(appId);
 
-    // Save mapping (globally!)
-    const success = await saveGameMapping(game.name, appId);
-    if (success) {
-      // Update game locally
-      let updatedGames = games.map(g => g.id === gameId ? { ...g, appId: appId, image: gameImage } : g);
-      setGames(updatedGames);
+    // Update game locally FIRST, show immediately
+    const updatedGames = games.map(g => g.id === gameId ? { ...g, appId: appId, image: gameImage } : g);
+    setGames(updatedGames);
+    
+    // Clear suggestions for this game
+    setShowMappingSuggestionsFor(null);
+    setMappingSuggestions(prev => {
+      const newSuggestions = { ...prev };
+      delete newSuggestions[gameId];
+      return newSuggestions;
+    });
 
-      // Fetch price for this game
-      if (settings.steam.enableIntegration) {
-        setLoadingPrices(true);
-        try {
-          const priceData = await fetchSteamPrice(appId, settings);
-          if (priceData) {
-            const finalUpdatedGames = updatedGames.map(g => g.id === gameId ? {
-              ...g,
-              price: priceData.price,
-              discount: priceData.discount,
-              originalPrice: priceData.originalPrice
-            } : g);
-            setGames(finalUpdatedGames);
-          }
-        } catch (error) {
-          console.error('Error fetching price:', error);
-        } finally {
-          setLoadingPrices(false);
-        }
-      }
-
-      // Clear suggestions for this game
-      setShowMappingSuggestionsFor(null);
-      setMappingSuggestions(prev => {
-        const newSuggestions = { ...prev };
-        delete newSuggestions[gameId];
-        return newSuggestions;
-      });
-    }
+    // Do the rest in background without blocking UI
+    (async () => {
+      await saveGameMapping(game.name, appId);
+      fetchPriceInBackground(gameId, appId);
+    })();
   };
 
   const saveEditedGame = () => {
@@ -316,32 +359,57 @@ function App() {
   };
 
   const handleSteamGameSelect = async (selectedAppId: string | undefined) => {
-    let priceData: any = undefined;
-    let gameImage: string | undefined = undefined;
-    
-    // Find the selected result to get its icon
-    if (selectedAppId) {
-      const selectedResult = steamSearchResults.find(r => r.appId === selectedAppId);
-      gameImage = selectedResult?.icon || getSteamGameIconUrl(selectedAppId);
-      
-      await saveGameMapping(gameNameToMap, selectedAppId);
-      if (settings.steam.enableIntegration) {
-        priceData = await fetchSteamPrice(selectedAppId, settings);
-      }
-    }
-    const newGame: Game = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: gameNameToMap,
-      appId: selectedAppId,
-      color: getGameColor(games.length), // Use current length for color calculation
-      image: gameImage,
-      ...priceData
-    };
-    setGames([...games, newGame]);
-    setNewGameName(''); // Clear new game input
-    setSteamSearchResults([]);
+    // First clean up any temp game state
+    const currentTempGameId = tempGameId;
     setShowSteamSearchResultsModal(false);
     setGameNameToMap('');
+    setSteamSearchResults([]);
+    setTempGameId(null);
+
+    if (!currentTempGameId) {
+      // No temp game, add new one
+      let gameImage: string | undefined = undefined;
+      
+      if (selectedAppId) {
+        const selectedResult = steamSearchResults.find(r => r.appId === selectedAppId);
+        gameImage = selectedResult?.icon || getSteamGameIconUrl(selectedAppId);
+      }
+      const newGame: Game = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: gameNameToMap,
+        appId: selectedAppId,
+        color: getGameColor(games.length), // Use current length for color calculation
+        image: gameImage
+      };
+      setGames([...games, newGame]);
+      
+      if (selectedAppId) {
+        (async () => {
+          await saveGameMapping(gameNameToMap, selectedAppId);
+          fetchPriceInBackground(newGame.id, selectedAppId);
+        })();
+      }
+    } else {
+      // We have a temp game, update it!
+      if (selectedAppId) {
+        const selectedResult = steamSearchResults.find(r => r.appId === selectedAppId);
+        const gameImage = selectedResult?.icon || getSteamGameIconUrl(selectedAppId);
+        setGames(prevGames => {
+          const game = prevGames.find(g => g.id === currentTempGameId);
+          if (game) {
+            return prevGames.map(g => g.id === currentTempGameId ? { ...g, appId: selectedAppId, image: gameImage } : g);
+          }
+          return prevGames;
+        });
+        
+        (async () => {
+          await saveGameMapping(gameNameToMap, selectedAppId);
+          fetchPriceInBackground(currentTempGameId, selectedAppId);
+        })();
+      } else {
+        // If no appId selected, just leave the temp game as is
+      }
+    }
   };
 
   const handleWinScreenGameSelect = async (selectedAppId: string | undefined, originalGame: Game) => {
@@ -349,38 +417,39 @@ function App() {
     if (selectedAppId) {
       const selectedResult = steamSearchResults.find(r => r.appId === selectedAppId);
       gameImage = selectedResult?.icon || getSteamGameIconUrl(selectedAppId);
-      await saveGameMapping(originalGame.name, selectedAppId);
     }
 
     const updatedGame = { ...originalGame, appId: selectedAppId, image: gameImage };
     setGames(prevGames => prevGames.map(g => g.id === originalGame.id ? updatedGame : g));
     setSelectedGame(updatedGame); // Update the selected game on win screen
-
-    // Re-fetch price for the updated game
-    if (updatedGame.appId && settings.steam.enableIntegration) {
-      setLoadingPrices(true);
-      try {
-        const data = await fetchSteamPrice(updatedGame.appId, settings);
-        if (data) {
-          const finalUpdatedGame = { 
-            ...updatedGame, 
-            price: data.price, 
-            discount: data.discount, 
-            originalPrice: data.originalPrice 
-          };
-          setSelectedGame(finalUpdatedGame);
-          setGames(prevGames => prevGames.map(g => g.id === originalGame.id ? finalUpdatedGame : g));
-        }
-      } catch (error) {
-        console.error('Error fetching price on win screen after mapping:', error);
-      } finally {
-        setLoadingPrices(false);
-      }
-    }
-
     setShowWinScreenMappingModal(false);
     setGameToMapOnWinScreen(null);
     setSteamSearchResults([]);
+
+    // Do the rest in background
+    if (selectedAppId) {
+      (async () => {
+        await saveGameMapping(originalGame.name, selectedAppId);
+        if (settings.steam.enableIntegration) {
+          try {
+            const data = await fetchSteamPrice(selectedAppId, settings);
+            if (data) {
+              setGames(prevGames => {
+                const game = prevGames.find(g => g.id === originalGame.id);
+                if (game && game.appId === selectedAppId) {
+                  const finalUpdatedGame = { ...game, ...data };
+                  setSelectedGame(finalUpdatedGame);
+                  return prevGames.map(g => g.id === originalGame.id ? finalUpdatedGame : g);
+                }
+                return prevGames;
+              });
+            }
+          } catch (error) {
+            console.error('Error fetching price on win screen after mapping:', error);
+          }
+        }
+      })();
+    }
   };
 
   const { playSpinSound, playWinSound } = useAudio();
@@ -750,50 +819,72 @@ function App() {
     if (!newGameName.trim()) return;
 
     const gameName = newGameName.trim();
-    let appId: string | undefined = undefined;
-    let priceData: any = undefined;
-    let gameImage: string | undefined = undefined;
+    setNewGameName('');
 
     if (settings.steam.enableIntegration) {
       // 1. Try to get mapping from DB
       const dbMapping = await getGameMapping(gameName);
       if (dbMapping) {
-        appId = dbMapping.app_id;
-        gameImage = getSteamGameIconUrl(appId);
-        // Fetch price immediately
-        priceData = await fetchSteamPrice(appId, settings);
+        // We have a mapping, add the game now and fetch price in background
+        const newGame: Game = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: gameName,
+          appId: dbMapping.app_id,
+          color: getGameColor(games.length),
+          image: getSteamGameIconUrl(dbMapping.app_id)
+        };
+        setGames([...games, newGame]);
+        (async () => fetchPriceInBackground(newGame.id, dbMapping.app_id))();
+        return;
       } else {
         // 2. Search Steam for the game
         const searchResults = await searchSteamGames(gameName);
 
         if (searchResults.length === 1) {
-          appId = searchResults[0].appId;
-          gameImage = searchResults[0].icon;
-          // Save this new mapping to DB
-          await saveGameMapping(gameName, appId);
-          // Fetch price
-          priceData = await fetchSteamPrice(appId, settings);
+          // Auto-select if only one result
+          const newGame: Game = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: gameName,
+            appId: searchResults[0].appId,
+            color: getGameColor(games.length),
+            image: searchResults[0].icon || getSteamGameIconUrl(searchResults[0].appId)
+          };
+          setGames([...games, newGame]);
+          (async () => {
+            await saveGameMapping(gameName, searchResults[0].appId);
+            fetchPriceInBackground(newGame.id, searchResults[0].appId);
+          })();
         } else if (searchResults.length > 1) {
-          // Show modal for user to choose
+          // Show modal for user to choose, add a temp game first
+          const tempGame: Game = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: gameName,
+            color: getGameColor(games.length)
+          };
+          setGames([...games, tempGame]);
+          setTempGameId(tempGame.id);
           setSteamSearchResults(searchResults);
           setGameNameToMap(gameName);
           setShowSteamSearchResultsModal(true);
-          setNewGameName(''); // Clear input while modal is open
-          return; // Exit as user needs to interact with modal
+        } else {
+          // No results, just add the game
+          const newGame: Game = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: gameName,
+            color: getGameColor(games.length)
+          };
+          setGames([...games, newGame]);
         }
       }
+    } else {
+      // Steam integration disabled, just add the game
+      const newGame: Game = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: gameName,
+        color: getGameColor(games.length)
+      };
+      setGames([...games, newGame]);
     }
-
-    const newGame: Game = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: gameName,
-      appId: appId,
-      color: getGameColor(games.length),
-      image: gameImage,
-      ...priceData
-    };
-    setGames([...games, newGame]);
-    setNewGameName('');
   };
 
   const handleImportGames = () => {
@@ -1109,7 +1200,7 @@ function App() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
-                        {mappingSuggestions[game.id] && mappingSuggestions[game.id].length > 1 && (
+                        {mappingSuggestions[game.id] && mappingSuggestions[game.id].length > 0 && (
                           <button
                             onClick={() => setShowMappingSuggestionsFor(showMappingSuggestionsFor === game.id ? null : game.id)}
                             className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold px-2 py-1 bg-indigo-900/30 rounded transition-all"
@@ -1135,6 +1226,42 @@ function App() {
                     {showMappingSuggestionsFor === game.id && (
                       <div className="mt-2 space-y-2 bg-slate-800/70 p-3 rounded-lg">
                         <h4 className="text-xs font-bold text-slate-300 mb-2">Выберите игру:</h4>
+                        <div className="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={manualSearchQuery}
+                            onChange={(e) => setManualSearchQuery(e.target.value)}
+                            placeholder="Поиск в Steam..."
+                            className="flex-1 text-sm px-3 py-2 rounded bg-slate-700 text-white placeholder-slate-400 border border-slate-600"
+                          />
+                          <button
+                            onClick={async () => {
+                              if (!manualSearchQuery.trim()) return;
+                              setManualSearchLoading(true);
+                              const results = await searchSteamGames(manualSearchQuery);
+                              // Convert to MappingSuggestion type
+                              const suggestions: MappingSuggestion[] = results.map(result => ({
+                                appId: result.appId,
+                                name: result.name,
+                                icon: result.icon
+                              }));
+                              // Merge with existing suggestions, removing duplicates
+                              const existingSuggestions = mappingSuggestions[game.id] || [];
+                              const mergedSuggestions = [...suggestions];
+                              for (const existing of existingSuggestions) {
+                                if (!mergedSuggestions.find(s => s.appId === existing.appId)) {
+                                  mergedSuggestions.push(existing);
+                                }
+                              }
+                              setMappingSuggestions({ ...mappingSuggestions, [game.id]: mergedSuggestions });
+                              setManualSearchLoading(false);
+                            }}
+                            disabled={manualSearchLoading}
+                            className="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50"
+                          >
+                            {manualSearchLoading ? '...' : 'Поиск'}
+                          </button>
+                        </div>
                         {mappingSuggestions[game.id].map((suggestion) => (
                           <button
                             key={suggestion.appId}
@@ -1175,7 +1302,10 @@ function App() {
                           </button>
                         ))}
                         <button
-                          onClick={() => setShowMappingSuggestionsFor(null)}
+                          onClick={() => {
+                            setShowMappingSuggestionsFor(null);
+                            setManualSearchQuery('');
+                          }}
                           className="mt-2 text-sm text-slate-400 hover:text-white"
                         >
                           Отмена

@@ -11,7 +11,32 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
 
-// Helper to get Steam price
+// Helper to normalize strings for comparison (ignore case, punctuation, extra spaces)
+function normalizeString(s: string): string {
+  return s.toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '') // remove punctuation and symbols
+    .replace(/\s+/g, ' ') // replace multiple spaces with single
+    .trim();
+}
+
+// Helper to transliterate Russian to Latin characters
+function transliterateRussian(text: string): string {
+  const cyrillicMap: Record<string, string> = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
+    'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
+    'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts',
+    'ч': 'ch', 'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e',
+    'ю': 'yu', 'я': 'ya', 'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D',
+    'Е': 'E', 'Ё': 'Yo', 'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K',
+    'Л': 'L', 'М': 'M', 'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S',
+    'Т': 'T', 'У': 'U', 'Ф': 'F', 'Х': 'Kh', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh',
+    'Щ': 'Shch', 'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya'
+  };
+  
+  return text.split('').map(char => cyrillicMap[char] || char).join('');
+}
+
+// Helper to get steam price
 async function fetchSteamPriceFromAPI(appId: string, region: string) {
   const regionMap: Record<string, string> = {
     kz: "kz", ru: "ru", us: "us", eu: "eu"
@@ -38,10 +63,99 @@ async function fetchSteamPriceFromAPI(appId: string, region: string) {
 // Helper to search Steam for games
 async function searchSteamGames(query: string) {
   try {
-    const url = `https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(query)}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    return data.slice(0, 10).map((item: any) => ({
+    console.log("Searching for:", query);
+    // Try multiple versions of the query
+    const transliterated = transliterateRussian(query);
+    const searchQueries = [
+      query,
+      query.substring(0, 50),
+      query.split(' ').slice(0, 3).join(' '),
+      transliterated,
+      transliterated.substring(0, 50),
+      transliterated.split(' ').slice(0, 3).join(' '),
+      query.replace(/[^a-zA-Z0-9 ]/g, ''), // Also try removing all non-alphanumeric
+      transliterated.replace(/[^a-zA-Z0-9 ]/g, '')
+    ].filter(q => q.length > 0);
+    
+    let allResults: any[] = [];
+    
+    // Try all search methods in order
+    for (const q of searchQueries) {
+      // 1. Steam Community Search
+      try {
+        const url = `https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(q)}?l=russian`;
+        const response = await fetch(url);
+        const data = await response.json();
+        console.log("Community search results:", data);
+        if (data && Array.isArray(data)) {
+          allResults = allResults.concat(data);
+          if (data.length > 0) break; // If we get results, stop trying this query
+        }
+      } catch (e) { console.log("Community search error:", e); }
+      
+      // 2. Steam Store Suggest API
+      try {
+        const url = `https://store.steampowered.com/search/suggest?term=${encodeURIComponent(q)}&f=games&cc=RU&realm=1`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const text = await response.text();
+          try {
+            const data = JSON.parse(text);
+            console.log("Store suggest results:", data);
+            if (data && Array.isArray(data) && data.length > 0) {
+              for (const item of data) {
+                if (item && item.appid) {
+                  allResults.push({ appid: item.appid, name: item.name || item.label || '' });
+                }
+              }
+              if (allResults.length > 0) break;
+            }
+          } catch (e) { console.log("Store suggest parse error:", e); }
+        }
+      } catch (e) { console.log("Store suggest error:", e); }
+      
+      // 3. Steam Store Search Page (parse HTML)
+      try {
+        const url = `https://store.steampowered.com/search/?term=${encodeURIComponent(q)}&cc=RU&supportedlang=russian`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const html = await response.text();
+          const appIdRegex = /data-ds-appid="(\d+)"/g;
+          const nameRegex = /<span class="title">([^<]+)<\/span>/g;
+          let match;
+          let nameMatch;
+          const apps = [];
+          let index = 0;
+          while ((match = appIdRegex.exec(html)) !== null && index < 10) {
+            nameRegex.lastIndex = match.index - 500; // Look back a bit for the name
+            nameMatch = nameRegex.exec(html);
+            if (nameMatch) {
+              apps.push({ appid: parseInt(match[1]), name: nameMatch[1] });
+              index++;
+            }
+          }
+          console.log("Store page results:", apps);
+          if (apps.length > 0) {
+            allResults = allResults.concat(apps);
+            break;
+          }
+        }
+      } catch (e) { console.log("Store page error:", e); }
+    }
+    
+    // Deduplicate results by appId
+    const uniqueResults: any[] = [];
+    const seenAppIds = new Set();
+    for (const item of allResults) {
+      if (!seenAppIds.has(item.appid)) {
+        seenAppIds.add(item.appid);
+        uniqueResults.push(item);
+      }
+    }
+    
+    console.log("Final search results:", uniqueResults);
+    
+    return uniqueResults.slice(0, 15).map((item: any) => ({
       appId: item.appid,
       name: item.name,
       // Use Akamai CDN instead of Cloudflare to avoid ORB blocking
@@ -50,6 +164,7 @@ async function searchSteamGames(query: string) {
         : `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${item.appid}/header.jpg`
     }));
   } catch (error) {
+    console.error("Steam search error:", error);
     return [];
   }
 }
@@ -128,23 +243,42 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && (pathname.startsWith("/api/mappings/suggest") || pathname.startsWith("/mappings/suggest"))) {
       const url2 = new URL(req.url);
       const gameName = decodeURIComponent(url2.searchParams.get("gameName") || "");
+      const normalizedGameName = normalizeString(gameName);
       
-      // First get existing mapping
-      const { data: existingMapping, error: mappingErr } = await supabase
+      // First get exact existing mapping
+      let { data: existingMapping, error: mappingErr } = await supabase
         .from("game_mappings")
-        .select("app_id")
+        .select("*")
         .eq("game_name", gameName)
         .maybeSingle();
+
+      // If no exact match, try all game_mappings and find best match by normalized string
+      if (!existingMapping) {
+        const { data: allMappings } = await supabase.from("game_mappings").select("*").limit(1000);
+        if (allMappings && allMappings.length > 0) {
+          existingMapping = allMappings.find(m => normalizeString(m.game_name) === normalizedGameName);
+        }
+      }
 
       // Then search steam search results
       const searchResults = await searchSteamGames(gameName);
 
-      // Then get most used mappings for similar games
-      const { data: usageData } = await supabase
+      // Then get most used mappings: first exact, then all mappings with normalized match
+      let { data: usageData } = await supabase
         .from("game_mapping_usage")
         .select("app_id, count")
         .eq("game_name", gameName)
         .order("count", { ascending: false });
+
+      if (!usageData || usageData.length === 0) {
+        // Get all usage data and find matches with normalized game name
+        const { data: allUsage } = await supabase.from("game_mapping_usage").select("*").limit(1000);
+        if (allUsage && allUsage.length > 0) {
+          usageData = allUsage
+            .filter(u => normalizeString(u.game_name) === normalizedGameName)
+            .sort((a, b) => b.count - a.count);
+        }
+      }
 
       return new Response(
         JSON.stringify({
